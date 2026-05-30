@@ -23,15 +23,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cursor.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
     conn.commit()
 
-    keyboard = [
-        [InlineKeyboardButton("📢 Canali", callback_data="canali")],
-        [InlineKeyboardButton("📞 Info/Contatti", callback_data="info")]
-    ]
-
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
     await update.message.reply_text(
-        "👋 Sei registrato! Riceverai gli aggiornamenti. Se hai bisogno di altro scegli un'opzione:",
+        "👋 Sei registrato! Riceverai gli aggiornamenti. Se hai bisogno di altro scegli un'opzione dal menù:",
         reply_markup=reply_markup
     )
 
@@ -40,7 +33,7 @@ async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "📞 CONTATTI:\n\n"
         "Telegram: https://t.me/CAMPANIAVIP\n"
-        "WhatsApp: https://t.me/+393509741712"
+        "WhatsApp: https://t.we/+393509741712"
     )
 
 # 🔹 CANALI
