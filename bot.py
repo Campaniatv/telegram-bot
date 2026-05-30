@@ -86,7 +86,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     for (uid,) in users:
         try:
-            # 🔥 copia qualsiasi tipo di messaggio
             await context.bot.copy_message(
                 chat_id=uid,
                 from_chat_id=update.effective_chat.id,
@@ -99,11 +98,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_state[user_id] = None
     await update.message.reply_text(f"✅ Inviato a {sent} utenti")
 
+# 🔹 COMANDO UTENTI
+async def utenti(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("⛔ Non autorizzato")
+        return
+
+    cursor.execute("SELECT COUNT(*) FROM users")
+    totale = cursor.fetchone()[0]
+
+    await update.message.reply_text(f"👥 Utenti totali: {totale}")
+
 # 🔹 SETUP BOT
 app = Application.builder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("broadcast", broadcast))
+app.add_handler(CommandHandler("utenti", utenti))
 app.add_handler(CallbackQueryHandler(button_handler))
 
 # 👇 QUESTO È IMPORTANTISSIMO
