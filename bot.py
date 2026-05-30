@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS users (
 """)
 conn.commit()
 
-# 🔹 START (salva utente nel database)
+# 🔹 START
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
 
@@ -31,18 +31,20 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await update.message.reply_text(
-        "👋 Sei registrato! Riceverai gli aggiornamenti. se hai bisogno di altro scegli un'opzione:",
+        "👋 Sei registrato! Riceverai gli aggiornamenti. Se hai bisogno di altro scegli un'opzione:",
         reply_markup=reply_markup
     )
-    
-    async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+# 🔹 INFO
+async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "📞 CONTATTI:\n\n"
         "Telegram: https://t.me/CAMPANIAVIP\n"
         "WhatsApp: https://t.me/+393509741712"
     )
-    
-    async def canali(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+# 🔹 CANALI
+async def canali(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "📢 CANALI:\n\n"
         "🎬 Aggiornamenti sport, film e serie TV:\n"
@@ -51,9 +53,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "https://t.me/+Xv4kd5Uja0YzY2M0"
     )
 
-# 🔹 BROADCAST (solo admin)
+# 🔹 BROADCAST
 async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    ADMIN_ID = 1092687569  # <-- METTI QUI IL TUO ID
+    ADMIN_ID = 1092687569
 
     if update.effective_user.id != ADMIN_ID:
         await update.message.reply_text("⛔ Non autorizzato")
@@ -83,8 +85,8 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
 app = Application.builder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("broadcast", broadcast))
 app.add_handler(CommandHandler("info", info))
 app.add_handler(CommandHandler("canali", canali))
+app.add_handler(CommandHandler("broadcast", broadcast))
 
 app.run_polling()
