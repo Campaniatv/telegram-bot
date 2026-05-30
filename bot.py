@@ -1,4 +1,4 @@
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, ContextTypes
 import os
 import sqlite3
@@ -23,8 +23,32 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cursor.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
     conn.commit()
 
+    keyboard = [
+        [InlineKeyboardButton("📢 Canali", callback_data="canali")],
+        [InlineKeyboardButton("📞 Info/Contatti", callback_data="info")]
+    ]
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
     await update.message.reply_text(
-        "👋 Sei registrato! Riceverai gli aggiornamenti."
+        "👋 Sei registrato! Riceverai gli aggiornamenti. se hai bisogno di altro scegli un'opzione:",
+        reply_markup=reply_markup
+    )
+    
+    async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "📞 CONTATTI:\n\n"
+        "Telegram: https://t.me/CAMPANIAVIP\n"
+        "WhatsApp: https://t.me/+393509741712"
+    )
+    
+    async def canali(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "📢 CANALI:\n\n"
+        "🎬 Aggiornamenti sport, film e serie TV:\n"
+        "https://t.me/+HLygUda0f_wwNmE0\n\n"
+        "⚽ Solo sport:\n"
+        "https://t.me/+Xv4kd5Uja0YzY2M0"
     )
 
 # 🔹 BROADCAST (solo admin)
@@ -60,5 +84,7 @@ app = Application.builder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("broadcast", broadcast))
+app.add_handler(CommandHandler("info", info))
+app.add_handler(CommandHandler("canali", canali))
 
 app.run_polling()
