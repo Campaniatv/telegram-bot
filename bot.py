@@ -1,5 +1,5 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler
 import os
 import sqlite3
 
@@ -23,30 +23,40 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cursor.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
     conn.commit()
 
+    keyboard = [
+        [InlineKeyboardButton("📞 Info", callback_data="info")],
+        [InlineKeyboardButton("📢 Canali", callback_data="canali")]
+    ]
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
     await update.message.reply_text(
-        "👋 Sei registrato! Riceverai gli aggiornamenti. Se hai bisogno di altro scegli un'opzione dal menù:",
+        "👋 Sei registrato! Riceverai gli aggiornamenti. Se hai bisogno di altro scegli un'opzione:",
         reply_markup=reply_markup
     )
 
-# 🔹 INFO
-async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "📞 CONTATTI:\n\n"
-        "Telegram: https://t.me/CAMPANIAVIP\n"
-        "WhatsApp: https://t.we/+393509741712"
-    )
+# 🔹 CALLBACK (gestisce i bottoni)
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
 
-# 🔹 CANALI
-async def canali(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "📢 CANALI:\n\n"
-        "🎬 Aggiornamenti sport, film e serie TV:\n"
-        "https://t.me/+HLygUda0f_wwNmE0\n\n"
-        "⚽ Solo sport:\n"
-        "https://t.me/+Xv4kd5Uja0YzY2M0"
-    )
+    if query.data == "info":
+        await query.message.reply_text(
+            "📞 CONTATTI:\n\n"
+            "Telegram: https://t.me/CAMPANIAVIP\n"
+            "WhatsApp: https://wa.me/+393509741712"
+        )
 
-# 🔹 BROADCAST
+    elif query.data == "canali":
+        await query.message.reply_text(
+            "📢 CANALI:\n\n"
+            "🎬 Film/Serie/Sport:\n"
+            "https://t.me/+HLygUda0f_wwNmE0\n\n"
+            "⚽ Solo sport:\n"
+            "https://t.me/+Xv4kd5Uja0YzY2M0"
+        )
+
+# 🔹 BROADCAST (admin)
 async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ADMIN_ID = 1092687569
 
@@ -74,12 +84,11 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(f"✅ Inviato a {sent} utenti")
 
-# 🔹 SETUP
+# 🔹 SETUP BOT
 app = Application.builder().token(TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("info", info))
-app.add_handler(CommandHandler("canali", canali))
 app.add_handler(CommandHandler("broadcast", broadcast))
+app.add_handler(CallbackQueryHandler(button_handler))
 
 app.run_polling()
