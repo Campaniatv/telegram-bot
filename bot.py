@@ -1,9 +1,13 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, ContextTypes, CallbackQueryHandler
+from telegram.ext import (
+    Application, CommandHandler, ContextTypes,
+    CallbackQueryHandler, MessageHandler, filters
+)
 import os
 import sqlite3
 
 TOKEN = os.getenv("BOT_TOKEN")
+ADMIN_ID = 1092687569
 
 # 🔹 DATABASE
 conn = sqlite3.connect("bot.db", check_same_thread=False)
@@ -15,6 +19,9 @@ CREATE TABLE IF NOT EXISTS users (
 )
 """)
 conn.commit()
+
+# 🔹 STATO UTENTE (per broadcast)
+user_state = {}
 
 # 🔹 START
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -31,11 +38,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     await update.message.reply_text(
-        "👋 Sei registrato! Riceverai gli aggiornamenti. Se hai bisogno di altro scegli un'opzione:",
+        "👋 Sei registrato! Riceverai gli aggiornamenti.\n\nScegli un'opzione:",
         reply_markup=reply_markup
     )
 
-# 🔹 CALLBACK (gestisce i bottoni)
+# 🔹 BOTTONI
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -56,18 +63,20 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "https://t.me/+Xv4kd5Uja0YzY2M0"
         )
 
-# 🔹 BROADCAST (admin)
+# 🔹 COMANDO BROADCAST (STEP 1)
 async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    ADMIN_ID = 1092687569
-
     if update.effective_user.id != ADMIN_ID:
         await update.message.reply_text("⛔ Non autorizzato")
         return
 
-    message = " ".join(context.args)
+    user_state[update.effective_user.id] = "broadcast"
+    await update.message.reply_text("📢 Invia ORA il messaggio (testo, foto, video...)")
 
-    if not message:
-        await update.message.reply_text("Uso: /broadcast messaggio")
+# 🔹 RICEZIONE MESSAGGIO (STEP 2)
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+
+    if user_state.get(user_id) != "broadcast":
         return
 
     cursor.execute("SELECT user_id FROM users")
@@ -75,13 +84,19 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     sent = 0
 
-    for (user_id,) in users:
+    for (uid,) in users:
         try:
-            await context.bot.send_message(chat_id=user_id, text=message)
+            # 🔥 copia qualsiasi tipo di messaggio
+            await context.bot.copy_message(
+                chat_id=uid,
+                from_chat_id=update.effective_chat.id,
+                message_id=update.message.message_id
+            )
             sent += 1
         except:
             pass
 
+    user_state[user_id] = None
     await update.message.reply_text(f"✅ Inviato a {sent} utenti")
 
 # 🔹 SETUP BOT
@@ -90,5 +105,8 @@ app = Application.builder().token(TOKEN).build()
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("broadcast", broadcast))
 app.add_handler(CallbackQueryHandler(button_handler))
+
+# 👇 QUESTO È IMPORTANTISSIMO
+app.add_handler(MessageHandler(filters.ALL, handle_message))
 
 app.run_polling()
