@@ -1,7 +1,6 @@
 import os
 import asyncio
 import psycopg2
-from datetime import datetime
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -22,14 +21,11 @@ CREATE TABLE IF NOT EXISTS users (
     user_id BIGINT PRIMARY KEY,
     first_name TEXT,
     last_name TEXT,
-    username TEXT,
-    joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    username TEXT
 )
 """)
 conn.commit()
 
-# ✅ STATI UTENTE (broadcast)
 user_state = {}
 
 # ✅ SALVA UTENTE
@@ -41,99 +37,50 @@ def add_user(user):
     """, (user.id, user.first_name, user.last_name, user.username))
     conn.commit()
 
-# ✅ AGGIORNA ATTIVITÀ
-def update_active(user_id):
-    cursor.execute("""
-    UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE user_id = %s
-    """, (user_id,))
-    conn.commit()
-
 # ✅ START
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    add_user(user)
-
-    text = (
-        "✨ *Benvenuto!*\n\n"
-        "👉 t.me/AggiornamentiCampaniabot\n\n"
-        "🔧 *Guasti*\n"
-        "📢 *Aggiornamenti*\n"
-        "🎁 *Promozioni*\n\n"
-        "✅ Resta sempre aggiornato!\n\n"
-        "⚠️ Se avevi già avviato il bot, fallo di nuovo!"
-    )
+    add_user(update.effective_user)
 
     keyboard = [
-        [InlineKeyboardButton("🔧 Guasti", callback_data="guasti")],
-        [InlineKeyboardButton("📢 Aggiornamenti", callback_data="news")],
-        [InlineKeyboardButton("🎁 Promo", callback_data="promo")]
+        [InlineKeyboardButton("📞 Contatti", callback_data="contatti")],
+        [InlineKeyboardButton("ℹ️ Info", callback_data="info")]
     ]
 
     await update.message.reply_text(
-        text,
-        parse_mode="Markdown",
+        "✅ Bot attivo!\n\nUsa i bottoni o i comandi.",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
-# ✅ BOTTONI
-async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
+# ✅ INFO
+async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "ℹ️ INFO\n\nBot aggiornamenti automatici."
+    )
 
-    if query.data == "guasti":
-        await query.edit_message_text("🔧 Nessun guasto segnalato")
-    elif query.data == "news":
-        await query.edit_message_text("📢 Nessun aggiornamento")
-    elif query.data == "promo":
-        await query.edit_message_text("🎁 Nessuna promo attiva")
+# ✅ CONTATTI
+async def contatti(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "📞 CONTATTI:\n\n"
+        "Telegram: https://t.me/CAMPANIAVIP\n"
+        "WhatsApp: https://wa.me/+393509741712"
+    )
 
 # ✅ ADMIN
 async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
 
-    text = (
-        "🔧 *PANNELLO ADMIN*\n\n"
-        "/broadcast → invia messaggio\n"
-        "/stats → statistiche"
+    await update.message.reply_text(
+        "🔧 ADMIN\n\n/broadcast\n/stats"
     )
 
-    await update.message.reply_text(text, parse_mode="Markdown")
-
-# ✅ BROADCAST START
+# ✅ BROADCAST
 async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
 
     user_state[update.effective_user.id] = "broadcast"
-    await update.message.reply_text("📢 Invia ora il messaggio (testo, foto o video)")
-
-# ✅ HANDLE MESSAGGI
-async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    update_active(user.id)
-
-    # 👉 broadcast
-    if user_state.get(user.id) == "broadcast":
-        cursor.execute("SELECT user_id FROM users")
-        users = cursor.fetchall()
-
-        sent = 0
-
-        for (uid,) in users:
-            try:
-                await context.bot.copy_message(
-                    chat_id=uid,
-                    from_chat_id=update.effective_chat.id,
-                    message_id=update.message.message_id
-                )
-                sent += 1
-                await asyncio.sleep(0.05)
-            except:
-                pass
-
-        user_state[user.id] = None
-        await update.message.reply_text(f"✅ Inviato a {sent} utenti")
+    await update.message.reply_text("📢 Invia messaggio")
 
 # ✅ STATS
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -143,35 +90,62 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cursor.execute("SELECT COUNT(*) FROM users")
     total = cursor.fetchone()[0]
 
-    cursor.execute("""
-    SELECT COUNT(*) FROM users
-    WHERE joined_at >= NOW() - INTERVAL '1 day'
-    """)
-    today = cursor.fetchone()[0]
+    await update.message.reply_text(f"👥 Utenti: {total}")
 
-    cursor.execute("""
-    SELECT COUNT(*) FROM users
-    WHERE last_active >= NOW() - INTERVAL '7 days'
-    """)
-    active = cursor.fetchone()[0]
+# ✅ BOTTONI
+async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
 
-    await update.message.reply_text(
-        f"👥 Totali: {total}\n📅 Oggi: {today}\n🔥 Attivi: {active}"
-    )
+    if query.data == "info":
+        await query.message.reply_text("ℹ️ INFO\n\nBot aggiornamenti automatici.")
+
+    elif query.data == "contatti":
+        await query.message.reply_text(
+            "📞 CONTATTI:\n\n"
+            "Telegram: https://t.me/CAMPANIAVIP\n"
+            "WhatsApp: https://wa.me/+393509741712"
+        )
+
+# ✅ MESSAGGI
+async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+
+    if user_state.get(user.id) == "broadcast":
+        cursor.execute("SELECT user_id FROM users")
+        users = cursor.fetchall()
+
+        for (uid,) in users:
+            try:
+                await context.bot.copy_message(
+                    chat_id=uid,
+                    from_chat_id=update.effective_chat.id,
+                    message_id=update.message.message_id
+                )
+                await asyncio.sleep(0.05)
+            except:
+                pass
+
+        user_state[user.id] = None
+        await update.message.reply_text("✅ Inviato")
 
 # ✅ MAIN
 def main():
     app = Application.builder().token(TOKEN).build()
 
+    # ✅ COMANDI
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("admin", admin))
     app.add_handler(CommandHandler("broadcast", broadcast))
     app.add_handler(CommandHandler("stats", stats))
+    app.add_handler(CommandHandler("info", info))          # ✅ FIX
+    app.add_handler(CommandHandler("contatti", contatti))  # ✅ FIX
 
-    # ✅ FIX IMPORTANTE (NON BLOCCA COMANDI)
-    app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle))
-
+    # ✅ BOTTONI
     app.add_handler(CallbackQueryHandler(buttons))
+
+    # ✅ MESSAGGI (NON BLOCCA COMANDI)
+    app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle))
 
     print("🔥 BOT ONLINE")
 
