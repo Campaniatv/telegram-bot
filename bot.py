@@ -59,6 +59,13 @@ def main_menu():
         [InlineKeyboardButton("📞 Contatti", callback_data="contatti")]
     ])
 
+def admin_menu():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📊 Statistiche", callback_data="stats")],
+        [InlineKeyboardButton("📢 Broadcast", callback_data="broadcast")],
+        [InlineKeyboardButton("🔙 Indietro", callback_data="back")]
+    ])
+
 # ================= START =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     add_user(update.effective_user)
@@ -76,13 +83,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 # ================= COMANDI =================
-async def contatti(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "📞 CONTATTI:\n\n"
-        "Telegram: https://t.me/CAMPANIAVIP\n"
-        "WhatsApp: https://wa.me/393509741712"
-    )
-
 async def canali(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("🎬 Film / Serie / Sport", url="https://t.me/+HLygUda0f_wwNmE0")],
@@ -95,38 +95,52 @@ async def canali(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
+async def contatti(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "📞 CONTATTI:\n\n"
+        "Telegram: https://t.me/CAMPANIAVIP\n"
+        "WhatsApp: https://wa.me/393509741712"
+    )
+
+async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("⛔ Non autorizzato")
+        return
+
+    await update.message.reply_text(
+        "🔧 PANNELLO ADMIN",
+        reply_markup=admin_menu()
+    )
+
+async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+
+    user_state[update.effective_user.id] = "broadcast"
+    await update.message.reply_text("📢 Invia il messaggio da mandare a tutti")
+
 # ================= BOTTONI =================
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    if query.data == "canali":
-        keyboard = [
-            [InlineKeyboardButton("🎬 Film / Serie / Sport", url="https://t.me/+HLygUda0f_wwNmE0")],
-            [InlineKeyboardButton("⚽ Solo Sport", url="https://t.me/+Xv4kd5Uja0YzY2M0")],
-            [InlineKeyboardButton("🔙 Indietro", callback_data="back")]
-        ]
+    user_id = query.from_user.id
 
-        await query.edit_message_text(
-            "📢 CANALI UFFICIALI\n\nScegli:",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
+    if query.data == "canali":
+        await canali(query, context)
 
     elif query.data == "contatti":
-        await query.edit_message_text(
-            "📞 CONTATTI:\n\n"
-            "Telegram: https://t.me/CAMPANIAVIP\n"
-            "WhatsApp: https://wa.me/393509741712"
-        )
+        await contatti(query, context)
 
     elif query.data == "back":
-        await query.edit_message_text(
-            "👋 Menu principale:",
+        await query.message.reply_text(
+            "🔙 Menu principale:",
             reply_markup=main_menu()
         )
 
+    # ===== ADMIN =====
     elif query.data == "stats":
-        if update.effective_user.id != ADMIN_ID:
+        if user_id != ADMIN_ID:
             return
 
         cursor.execute("SELECT COUNT(*) FROM users")
@@ -138,41 +152,19 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cursor.execute("SELECT COUNT(*) FROM users WHERE last_active > NOW() - INTERVAL '30 days'")
         month = cursor.fetchone()[0]
 
-        await query.edit_message_text(
-            f"📊 STATISTICHE\n\n👥 Totali: {total}\n🔥 Oggi: {today}\n📅 Mese: {month}"
+        await query.message.reply_text(
+            f"📊 STATISTICHE\n\n"
+            f"👥 Totali: {total}\n"
+            f"🔥 Oggi: {today}\n"
+            f"📅 Mese: {month}"
         )
 
     elif query.data == "broadcast":
-        if update.effective_user.id != ADMIN_ID:
+        if user_id != ADMIN_ID:
             return
 
-        user_state[update.effective_user.id] = "broadcast"
-
-        await query.edit_message_text("📢 Invia ora il messaggio")
-
-# ================= ADMIN =================
-async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        return
-
-    keyboard = [
-        [InlineKeyboardButton("📊 Statistiche", callback_data="stats")],
-        [InlineKeyboardButton("📢 Broadcast", callback_data="broadcast")]
-    ]
-
-    await update.message.reply_text(
-        "🔧 PANNELLO ADMIN",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
-
-# ================= BROADCAST =================
-async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        return
-
-    user_state[update.effective_user.id] = "broadcast"
-
-    await update.message.reply_text("📢 Invia messaggio")
+        user_state[user_id] = "broadcast"
+        await query.message.reply_text("📢 Invia ora il messaggio")
 
 # ================= HANDLE =================
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -211,8 +203,8 @@ def main():
     app = Application.builder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("contatti", contatti))
     app.add_handler(CommandHandler("canali", canali))
+    app.add_handler(CommandHandler("contatti", contatti))
     app.add_handler(CommandHandler("admin", admin))
     app.add_handler(CommandHandler("broadcast", broadcast))
 
