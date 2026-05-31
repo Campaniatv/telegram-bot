@@ -4,31 +4,35 @@ from telegram.ext import (
     CallbackQueryHandler, MessageHandler, filters
 )
 import os
-import sqlite3
+import psycopg2
+import asyncio
 
 TOKEN = os.getenv("BOT_TOKEN")
+DATABASE_URL = os.getenv("DATABASE_URL")
 ADMIN_ID = 1092687569
 
 # 🔹 DATABASE
-conn = sqlite3.connect("bot.db", check_same_thread=False)
+conn = psycopg2.connect(DATABASE_URL)
 cursor = conn.cursor()
 
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS users (
-    user_id INTEGER PRIMARY KEY,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    user_id BIGINT PRIMARY KEY
 )
 """)
 conn.commit()
 
-# 🔹 STATO UTENTE (broadcast)
+# 🔹 STATO
 user_state = {}
 
 # 🔹 START
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
 
-    cursor.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
+    cursor.execute(
+        "INSERT INTO users (user_id) VALUES (%s) ON CONFLICT DO NOTHING",
+        (user_id,)
+    )
     conn.commit()
 
     keyboard = [
@@ -36,21 +40,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("📢 Canali", callback_data="canali")]
     ]
 
-    reply_markup = InlineKeyboardMarkup(keyboard)
-
     await update.message.reply_text(
-        "✨ *Benvenuto!*\n\n"
-        "🔔 Riceverai:\n"
-        "• Guasti in tempo reale\n"
-        "• Aggiornamenti\n"
-        "• Promozioni\n\n"
-        "⚠️ Controlla di avere le notifiche attive!\n\n"
-        "👇 Scegli un'opzione:",
-        reply_markup=reply_markup,
-        parse_mode="Markdown"
+        "👋 Sei registrato!\n\nScegli un'opzione:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
-# 🔹 INFO (comando)
+# 🔹 INFO
 async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "📞 CONTATTI:\n\n"
@@ -58,64 +53,52 @@ async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "WhatsApp: https://wa.me/+393509741712"
     )
 
-# 🔹 CONTATTI (alias)
-async def contatti(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await info(update, context)
+# 🔹 CANALI
+async def canali(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "📢 CANALI:\n\n"
+        "🎬 Film/Serie/Sport:\n"
+        "https://t.me/+HLygUda0f_wwNmE0\n\n"
+        "⚽ Solo sport:\n"
+        "https://t.me/+Xv4kd5Uja0YzY2M0"
+    )
 
-# 🔹 BOTTONI
+# 🔹 BOTTONI NORMALI
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
     if query.data == "info":
-        await query.message.reply_text(
-            "📞 CONTATTI:\n\n"
-            "Telegram: https://t.me/CAMPANIAVIP\n"
-            "WhatsApp: https://wa.me/+393509741712"
-        )
+        await info(update, context)
 
     elif query.data == "canali":
-        await query.message.reply_text(
-            "📢 CANALI:\n\n"
-            "🎬 Film/Serie/Sport:\n"
-            "https://t.me/+HLygUda0f_wwNmE0\n\n"
-            "⚽ Solo sport:\n"
-            "https://t.me/+Xv4kd5Uja0YzY2M0"
-        )
+        await canali(update, context)
 
-# 🔹 UTENTI TOTALI
-async def utenti(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    elif query.data == "admin_utenti":
+        cursor.execute("SELECT COUNT(*) FROM users")
+        count = cursor.fetchone()[0]
+        await query.message.reply_text(f"👥 Utenti: {count}")
+
+    elif query.data == "admin_broadcast":
+        user_state[query.from_user.id] = "broadcast"
+        await query.message.reply_text("📢 Invia il messaggio da mandare a tutti")
+
+# 🔹 PANNELLO ADMIN
+async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
 
-    cursor.execute("SELECT COUNT(*) FROM users")
-    count = cursor.fetchone()[0]
+    keyboard = [
+        [InlineKeyboardButton("👥 Utenti", callback_data="admin_utenti")],
+        [InlineKeyboardButton("📢 Broadcast", callback_data="admin_broadcast")]
+    ]
 
-    await update.message.reply_text(f"👥 Utenti totali: {count}")
+    await update.message.reply_text(
+        "⚙️ Pannello Admin",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
 
-# 🔹 UTENTI OGGI
-async def oggi(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        return
-
-    cursor.execute("""
-        SELECT COUNT(*) FROM users
-        WHERE DATE(created_at) = CURRENT_DATE
-    """)
-    count = cursor.fetchone()[0]
-
-    await update.message.reply_text(f"📈 Nuovi oggi: {count}")
-
-# 🔹 BROADCAST STEP 1
-async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        await update.message.reply_text("⛔ Non autorizzato")
-        return
-
-    user_state[update.effective_user.id] = "broadcast"
-    await update.message.reply_text("📢 Invia ORA il messaggio (testo, foto, video...)")
-
-# 🔹 BROADCAST STEP 2
+# 🔹 BROADCAST
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
 
@@ -127,49 +110,34 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     sent = 0
 
-    for user in users:
+    for (uid,) in users:
         try:
             await context.bot.copy_message(
-                chat_id=user[0],
-                from_chat_id=update.message.chat_id,
+                chat_id=uid,
+                from_chat_id=update.effective_chat.id,
                 message_id=update.message.message_id
             )
             sent += 1
+
+            # ✅ ANTI BAN (pausa)
+            await asyncio.sleep(0.05)
+
         except:
             pass
 
     user_state[user_id] = None
     await update.message.reply_text(f"✅ Inviato a {sent} utenti")
 
-# 🔹 PANNELLO ADMIN
-async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        return
+# 🔹 COMANDI
+app = Application.builder().token(TOKEN).build()
 
-    await update.message.reply_text(
-        "⚙️ PANNELLO ADMIN\n\n"
-        "/broadcast - invia messaggio\n"
-        "/utenti - totale utenti\n"
-        "/oggi - nuovi oggi"
-    )
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("info", info))
+app.add_handler(CommandHandler("canali", canali))
+app.add_handler(CommandHandler("admin", admin))
 
-# 🔹 SETUP BOT
-def main():
-    app = Application.builder().token(TOKEN).build()
+app.add_handler(CallbackQueryHandler(button_handler))
+app.add_handler(MessageHandler(filters.ALL, handle_message))
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("info", info))
-    app.add_handler(CommandHandler("contatti", contatti))
-    app.add_handler(CommandHandler("utenti", utenti))
-    app.add_handler(CommandHandler("oggi", oggi))
-    app.add_handler(CommandHandler("broadcast", broadcast))
-    app.add_handler(CommandHandler("admin", admin))
-
-    app.add_handler(CallbackQueryHandler(button_handler))
-    app.add_handler(MessageHandler(filters.ALL, handle_message))
-
-    print("✅ Bot avviato...")
-    app.run_polling()
-
-if __name__ == "__main__":
-    main()
+print("✅ Bot online con sistema PRO")
+app.run_polling()
