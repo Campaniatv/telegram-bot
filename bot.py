@@ -11,10 +11,9 @@ from telegram.ext import (
 
 TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = 1092687569
-
-# ✅ DATABASE POSTGRES (Railway)
 DATABASE_URL = os.getenv("DATABASE_URL")
 
+# ✅ DATABASE
 conn = psycopg2.connect(DATABASE_URL)
 cursor = conn.cursor()
 
@@ -29,6 +28,9 @@ CREATE TABLE IF NOT EXISTS users (
 )
 """)
 conn.commit()
+
+# ✅ STATI UTENTE (broadcast)
+user_state = {}
 
 # ✅ SALVA UTENTE
 def add_user(user):
@@ -46,7 +48,7 @@ def update_active(user_id):
     """, (user_id,))
     conn.commit()
 
-# ✅ /START
+# ✅ START
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     add_user(user)
@@ -57,7 +59,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🔧 *Guasti*\n"
         "📢 *Aggiornamenti*\n"
         "🎁 *Promozioni*\n\n"
-        "✅ Resta sempre aggiornato!"
+        "✅ Resta sempre aggiornato!\n\n"
+        "⚠️ Se avevi già avviato il bot, fallo di nuovo!"
     )
 
     keyboard = [
@@ -82,23 +85,35 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == "news":
         await query.edit_message_text("📢 Nessun aggiornamento")
     elif query.data == "promo":
-        await query.edit_message_text("🎁 Nessuna promo")
+        await query.edit_message_text("🎁 Nessuna promo attiva")
 
-# ✅ BROADCAST
-user_state = {}
-
+# ✅ ADMIN
 async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
 
-    user_state[update.effective_user.id] = "broadcast"
-    await update.message.reply_text("📢 Invia il messaggio da mandare a tutti")
+    text = (
+        "🔧 *PANNELLO ADMIN*\n\n"
+        "/broadcast → invia messaggio\n"
+        "/stats → statistiche"
+    )
 
+    await update.message.reply_text(text, parse_mode="Markdown")
+
+# ✅ BROADCAST START
+async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+
+    user_state[update.effective_user.id] = "broadcast"
+    await update.message.reply_text("📢 Invia ora il messaggio (testo, foto o video)")
+
+# ✅ HANDLE MESSAGGI
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    add_user(user)
     update_active(user.id)
 
+    # 👉 broadcast
     if user_state.get(user.id) == "broadcast":
         cursor.execute("SELECT user_id FROM users")
         users = cursor.fetchall()
@@ -113,14 +128,14 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     message_id=update.message.message_id
                 )
                 sent += 1
-                await asyncio.sleep(0.05)  # ✅ antiban
+                await asyncio.sleep(0.05)
             except:
                 pass
 
         user_state[user.id] = None
         await update.message.reply_text(f"✅ Inviato a {sent} utenti")
 
-# ✅ STATISTICHE
+# ✅ STATS
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
@@ -144,27 +159,19 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"👥 Totali: {total}\n📅 Oggi: {today}\n🔥 Attivi: {active}"
     )
 
-# ✅ SCHEDULER (NO JOBQUEUE 🔥)
-async def scheduler(app):
-    while True:
-        await asyncio.sleep(3600)
-        print("✅ Scheduler attivo")
-
-async def start_scheduler(app):
-    asyncio.create_task(scheduler(app))
-
 # ✅ MAIN
 def main():
     app = Application.builder().token(TOKEN).build()
 
-    app.post_init = start_scheduler  # ✅ FIX IMPORTANTE
-
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("admin", admin))
+    app.add_handler(CommandHandler("broadcast", broadcast))
     app.add_handler(CommandHandler("stats", stats))
 
+    # ✅ FIX IMPORTANTE (NON BLOCCA COMANDI)
+    app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle))
+
     app.add_handler(CallbackQueryHandler(buttons))
-    app.add_handler(MessageHandler(filters.ALL, handle))
 
     print("🔥 BOT ONLINE")
 
