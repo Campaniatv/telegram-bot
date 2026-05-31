@@ -17,20 +17,17 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 conn = psycopg2.connect(DATABASE_URL)
 cursor = conn.cursor()
 
-def setup_database():
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS users (
-        user_id BIGINT PRIMARY KEY,
-        first_name TEXT,
-        last_name TEXT,
-        username TEXT,
-        joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-    """)
-    conn.commit()
-
-setup_database()
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS users (
+    user_id BIGINT PRIMARY KEY,
+    first_name TEXT,
+    last_name TEXT,
+    username TEXT,
+    joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
+""")
+conn.commit()
 
 # ================= UTENTI =================
 def add_user(user):
@@ -55,29 +52,30 @@ def update_active(user_id):
 # ================= STATO =================
 user_state = {}
 
+# ================= MENU =================
+def main_menu():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📢 Canali", callback_data="canali")],
+        [InlineKeyboardButton("📞 Contatti", callback_data="contatti")]
+    ])
+
 # ================= START =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     add_user(update.effective_user)
 
-    keyboard = [
-        [InlineKeyboardButton("ℹ️ Info", callback_data="info")],
-        [InlineKeyboardButton("📢 Canali", callback_data="canali")],
-        [InlineKeyboardButton("📞 Contatti", callback_data="contatti")]
-    ]
-
     await update.message.reply_text(
-        "👋 Benvenuto!\n\nScegli un'opzione:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
+        "✅ *Bot attivo!*\n\n"
+        "Grazie per averci scelto 🙏\n\n"
+        "Riceverai:\n"
+        "🔧 Guasti\n"
+        "📢 Aggiornamenti\n"
+        "🎁 Promozioni\n\n"
+        "👇 Usa i pulsanti qui sotto:",
+        reply_markup=main_menu(),
+        parse_mode="Markdown"
     )
 
 # ================= COMANDI =================
-async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "ℹ️ INFO\n\n"
-        "In questo canale troverai comunicazioni ufficiali, aggiornamenti, avvisi e promozioni pubblicate periodicamente.\n\n"
-        "Resta iscritto per non perdere nessuna novità."
-    )
-
 async def contatti(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "📞 CONTATTI:\n\n"
@@ -85,39 +83,32 @@ async def contatti(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "WhatsApp: https://wa.me/393509741712"
     )
 
-# ================= PULSANTI =================
+async def canali(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [
+        [InlineKeyboardButton("🎬 Film / Serie / Sport", url="https://t.me/+HLygUda0f_wwNmE0")],
+        [InlineKeyboardButton("⚽ Solo Sport", url="https://t.me/+Xv4kd5Uja0YzY2M0")],
+        [InlineKeyboardButton("🔙 Indietro", callback_data="back")]
+    ]
+
+    await update.message.reply_text(
+        "📢 CANALI UFFICIALI\n\nScegli:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+# ================= BOTTONI =================
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    if query.data == "info":
-        await query.edit_message_text(
-            "ℹ️ INFO\n\n"
-            "In questo canale troverai comunicazioni ufficiali, aggiornamenti, avvisi e promozioni pubblicate periodicamente.\n\n"
-            "Resta iscritto per non perdere nessuna novità."
-        )
-
-    elif query.data == "canali":
+    if query.data == "canali":
         keyboard = [
-            [
-                InlineKeyboardButton(
-                    "🎬 Film / Serie / Sport",
-                    url="https://t.me/+HLygUda0f_wwNmE0"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    "⚽ Solo Sport",
-                    url="https://t.me/+Xv4kd5Uja0YzY2M0"
-                )
-            ]
+            [InlineKeyboardButton("🎬 Film / Serie / Sport", url="https://t.me/+HLygUda0f_wwNmE0")],
+            [InlineKeyboardButton("⚽ Solo Sport", url="https://t.me/+Xv4kd5Uja0YzY2M0")],
+            [InlineKeyboardButton("🔙 Indietro", callback_data="back")]
         ]
 
         await query.edit_message_text(
-            "📢 CANALI UFFICIALI\n\n"
-            "🎬 Film, Serie TV e Sport\n"
-            "⚽ Solo Sport\n\n"
-            "Scegli il canale che preferisci:",
+            "📢 CANALI UFFICIALI\n\nScegli:",
             reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
@@ -128,6 +119,12 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "WhatsApp: https://wa.me/393509741712"
         )
 
+    elif query.data == "back":
+        await query.edit_message_text(
+            "👋 Menu principale:",
+            reply_markup=main_menu()
+        )
+
     elif query.data == "stats":
         if update.effective_user.id != ADMIN_ID:
             return
@@ -135,23 +132,14 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cursor.execute("SELECT COUNT(*) FROM users")
         total = cursor.fetchone()[0]
 
-        cursor.execute("""
-        SELECT COUNT(*) FROM users
-        WHERE last_active > NOW() - INTERVAL '1 day'
-        """)
+        cursor.execute("SELECT COUNT(*) FROM users WHERE last_active > NOW() - INTERVAL '1 day'")
         today = cursor.fetchone()[0]
 
-        cursor.execute("""
-        SELECT COUNT(*) FROM users
-        WHERE last_active > NOW() - INTERVAL '30 days'
-        """)
+        cursor.execute("SELECT COUNT(*) FROM users WHERE last_active > NOW() - INTERVAL '30 days'")
         month = cursor.fetchone()[0]
 
         await query.edit_message_text(
-            f"📊 STATISTICHE\n\n"
-            f"👥 Totali: {total}\n"
-            f"🔥 Oggi: {today}\n"
-            f"📅 Mese: {month}"
+            f"📊 STATISTICHE\n\n👥 Totali: {total}\n🔥 Oggi: {today}\n📅 Mese: {month}"
         )
 
     elif query.data == "broadcast":
@@ -160,9 +148,7 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         user_state[update.effective_user.id] = "broadcast"
 
-        await query.edit_message_text(
-            "📢 Invia adesso il messaggio da inviare a tutti gli utenti."
-        )
+        await query.edit_message_text("📢 Invia ora il messaggio")
 
 # ================= ADMIN =================
 async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -179,33 +165,6 @@ async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
-# ================= STATS =================
-async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        return
-
-    cursor.execute("SELECT COUNT(*) FROM users")
-    total = cursor.fetchone()[0]
-
-    cursor.execute("""
-    SELECT COUNT(*) FROM users
-    WHERE last_active > NOW() - INTERVAL '1 day'
-    """)
-    today = cursor.fetchone()[0]
-
-    cursor.execute("""
-    SELECT COUNT(*) FROM users
-    WHERE last_active > NOW() - INTERVAL '30 days'
-    """)
-    month = cursor.fetchone()[0]
-
-    await update.message.reply_text(
-        f"📊 STATISTICHE\n\n"
-        f"👥 Totali: {total}\n"
-        f"🔥 Oggi: {today}\n"
-        f"📅 Mese: {month}"
-    )
-
 # ================= BROADCAST =================
 async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
@@ -213,9 +172,7 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_state[update.effective_user.id] = "broadcast"
 
-    await update.message.reply_text(
-        "📢 Invia il messaggio da inviare a tutti"
-    )
+    await update.message.reply_text("📢 Invia messaggio")
 
 # ================= HANDLE =================
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -254,11 +211,10 @@ def main():
     app = Application.builder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("info", info))
     app.add_handler(CommandHandler("contatti", contatti))
+    app.add_handler(CommandHandler("canali", canali))
     app.add_handler(CommandHandler("admin", admin))
     app.add_handler(CommandHandler("broadcast", broadcast))
-    app.add_handler(CommandHandler("stats", stats))
 
     app.add_handler(CallbackQueryHandler(buttons))
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle))
