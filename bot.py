@@ -1,7 +1,6 @@
 import os
 import asyncio
 import psycopg2
-from datetime import datetime, timedelta
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -9,35 +8,26 @@ from telegram.ext import (
     CallbackQueryHandler, MessageHandler, filters
 )
 
+# ================= CONFIG =================
 TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = 1092687569
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-# ================= DB =================
+# ================= DATABASE =================
 conn = psycopg2.connect(DATABASE_URL)
 cursor = conn.cursor()
 
 def setup_database():
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS users (
-        user_id BIGINT PRIMARY KEY
+        user_id BIGINT PRIMARY KEY,
+        first_name TEXT,
+        last_name TEXT,
+        username TEXT,
+        joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """)
-
-    columns = [
-        ("first_name", "TEXT"),
-        ("last_name", "TEXT"),
-        ("username", "TEXT"),
-        ("joined_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
-        ("last_active", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
-    ]
-
-    for col, tipo in columns:
-        try:
-            cursor.execute(f"ALTER TABLE users ADD COLUMN {col} {tipo}")
-        except:
-            pass
-
     conn.commit()
 
 setup_database()
@@ -62,6 +52,9 @@ def update_active(user_id):
     """, (user_id,))
     conn.commit()
 
+# ================= STATO =================
+user_state = {}
+
 # ================= START =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     add_user(update.effective_user)
@@ -72,15 +65,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
 
     await update.message.reply_text(
-        "✅ Bot attivo!\n\nScegli un'opzione:",
+        "👋 Benvenuto!\n\nScegli un'opzione:",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
-# ================= INFO =================
+# ================= COMANDI =================
 async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("ℹ️ Info bot attive")
 
-# ================= CONTATTI =================
 async def contatti(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "📞 CONTATTI:\n\n"
@@ -94,11 +86,22 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     if query.data == "info":
-        await info(update, context)
-    elif query.data == "contatti":
-        await contatti(update, context)
+        await query.message.reply_text("ℹ️ Info bot attive")
 
-# ================= ADMIN PANEL =================
+    elif query.data == "contatti":
+        await query.message.reply_text(
+            "📞 CONTATTI:\n\n"
+            "Telegram: https://t.me/CAMPANIAVIP\n"
+            "WhatsApp: https://wa.me/+393509741712"
+        )
+
+    elif query.data == "broadcast":
+        if query.from_user.id != ADMIN_ID:
+            return
+        user_state[query.from_user.id] = "broadcast"
+        await query.message.reply_text("📢 Invia il messaggio da inviare a tutti")
+
+# ================= ADMIN =================
 async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
@@ -109,52 +112,8 @@ async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
 
     await update.message.reply_text(
-        "⚙️ PANNELLO ADMIN",
+        "🔧 PANNELLO ADMIN",
         reply_markup=InlineKeyboardMarkup(keyboard)
-    )
-
-user_state = {}
-
-# ================= BROADCAST =================
-async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        return
-
-    user_state[update.effective_user.id] = "broadcast"
-    await update.message.reply_text("📢 Invia il messaggio da inviare a tutti")
-
-async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    update_active(user_id)
-
-    if user_state.get(user_id) != "broadcast":
-        return
-
-    cursor.execute("SELECT user_id FROM users")
-    users = cursor.fetchall()
-
-    sent = 0
-    removed = 0
-
-    for (uid,) in users:
-        try:
-            await context.bot.copy_message(
-                chat_id=uid,
-                from_chat_id=update.effective_chat.id,
-                message_id=update.message.message_id
-            )
-            sent += 1
-            await asyncio.sleep(0.05)  # ✅ anti-ban
-        except:
-            # ✅ rimuove utenti morti
-            cursor.execute("DELETE FROM users WHERE user_id = %s", (uid,))
-            conn.commit()
-            removed += 1
-
-    user_state[user_id] = None
-
-    await update.message.reply_text(
-        f"✅ Inviato: {sent}\n🧹 Rimossi: {removed}"
     )
 
 # ================= STATS =================
@@ -184,6 +143,46 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📅 Mese: {month}"
     )
 
+# ================= BROADCAST =================
+async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+
+    user_state[update.effective_user.id] = "broadcast"
+    await update.message.reply_text("📢 Invia il messaggio da inviare a tutti")
+
+# ================= HANDLE =================
+async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    update_active(user_id)
+
+    if user_state.get(user_id) == "broadcast":
+        cursor.execute("SELECT user_id FROM users")
+        users = cursor.fetchall()
+
+        sent = 0
+        removed = 0
+
+        for (uid,) in users:
+            try:
+                await context.bot.copy_message(
+                    chat_id=uid,
+                    from_chat_id=update.effective_chat.id,
+                    message_id=update.message.message_id
+                )
+                sent += 1
+                await asyncio.sleep(0.05)
+            except:
+                cursor.execute("DELETE FROM users WHERE user_id = %s", (uid,))
+                conn.commit()
+                removed += 1
+
+        user_state[user_id] = None
+
+        await update.message.reply_text(
+            f"✅ Inviato: {sent}\n🧹 Rimossi: {removed}"
+        )
+
 # ================= MAIN =================
 def main():
     app = Application.builder().token(TOKEN).build()
@@ -198,7 +197,7 @@ def main():
     app.add_handler(CallbackQueryHandler(buttons))
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle))
 
-    print("🔥 BOT ULTRA PRO ONLINE")
+    print("✅ BOT ONLINE PERFETTO")
     app.run_polling()
 
 if __name__ == "__main__":
