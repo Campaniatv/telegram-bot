@@ -61,6 +61,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyboard = [
         [InlineKeyboardButton("ℹ️ Info", callback_data="info")],
+        [InlineKeyboardButton("📢 Canali", callback_data="canali")],
         [InlineKeyboardButton("📞 Contatti", callback_data="contatti")]
     ]
 
@@ -71,35 +72,97 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ================= COMANDI =================
 async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("ℹ️ Info bot attive")
+    await update.message.reply_text(
+        "ℹ️ INFO\n\n"
+        "In questo canale troverai comunicazioni ufficiali, aggiornamenti, avvisi e promozioni pubblicate periodicamente.\n\n"
+        "Resta iscritto per non perdere nessuna novità."
+    )
 
 async def contatti(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "📞 CONTATTI:\n\n"
         "Telegram: https://t.me/CAMPANIAVIP\n"
-        "WhatsApp: https://wa.me/+393509741712"
+        "WhatsApp: https://wa.me/393509741712"
     )
 
-# ================= BOTTONI =================
+# ================= PULSANTI =================
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
     if query.data == "info":
-        await query.message.reply_text("ℹ️ Info bot attive")
+        await query.edit_message_text(
+            "ℹ️ INFO\n\n"
+            "In questo canale troverai comunicazioni ufficiali, aggiornamenti, avvisi e promozioni pubblicate periodicamente.\n\n"
+            "Resta iscritto per non perdere nessuna novità."
+        )
+
+    elif query.data == "canali":
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    "🎬 Film / Serie / Sport",
+                    url="https://t.me/+HLygUda0f_wwNmE0"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "⚽ Solo Sport",
+                    url="https://t.me/+Xv4kd5Uja0YzY2M0"
+                )
+            ]
+        ]
+
+        await query.edit_message_text(
+            "📢 CANALI UFFICIALI\n\n"
+            "🎬 Film, Serie TV e Sport\n"
+            "⚽ Solo Sport\n\n"
+            "Scegli il canale che preferisci:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
 
     elif query.data == "contatti":
-        await query.message.reply_text(
+        await query.edit_message_text(
             "📞 CONTATTI:\n\n"
             "Telegram: https://t.me/CAMPANIAVIP\n"
-            "WhatsApp: https://wa.me/+393509741712"
+            "WhatsApp: https://wa.me/393509741712"
+        )
+
+    elif query.data == "stats":
+        if update.effective_user.id != ADMIN_ID:
+            return
+
+        cursor.execute("SELECT COUNT(*) FROM users")
+        total = cursor.fetchone()[0]
+
+        cursor.execute("""
+        SELECT COUNT(*) FROM users
+        WHERE last_active > NOW() - INTERVAL '1 day'
+        """)
+        today = cursor.fetchone()[0]
+
+        cursor.execute("""
+        SELECT COUNT(*) FROM users
+        WHERE last_active > NOW() - INTERVAL '30 days'
+        """)
+        month = cursor.fetchone()[0]
+
+        await query.edit_message_text(
+            f"📊 STATISTICHE\n\n"
+            f"👥 Totali: {total}\n"
+            f"🔥 Oggi: {today}\n"
+            f"📅 Mese: {month}"
         )
 
     elif query.data == "broadcast":
-        if query.from_user.id != ADMIN_ID:
+        if update.effective_user.id != ADMIN_ID:
             return
-        user_state[query.from_user.id] = "broadcast"
-        await query.message.reply_text("📢 Invia il messaggio da inviare a tutti")
+
+        user_state[update.effective_user.id] = "broadcast"
+
+        await query.edit_message_text(
+            "📢 Invia adesso il messaggio da inviare a tutti gli utenti."
+        )
 
 # ================= ADMIN =================
 async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -149,7 +212,10 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     user_state[update.effective_user.id] = "broadcast"
-    await update.message.reply_text("📢 Invia il messaggio da inviare a tutti")
+
+    await update.message.reply_text(
+        "📢 Invia il messaggio da inviare a tutti"
+    )
 
 # ================= HANDLE =================
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
