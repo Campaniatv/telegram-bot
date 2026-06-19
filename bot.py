@@ -79,7 +79,7 @@ def update_active(user_id):
 # ================= STATO =================
 user_state = {}
 
-# ================= COMANDI =================
+# ================= COMANDI PRINCIPALI =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     add_user(update.effective_user)
 
@@ -103,7 +103,7 @@ async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def canali(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Nuovo comando /canali"""
+    """Comando /canali"""
     keyboard = [
         [
             InlineKeyboardButton(
@@ -128,15 +128,16 @@ async def canali(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def contatti(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Nuovo comando /contatti"""
+    """Comando /contatti"""
     await update.message.reply_text(
         "📞 CONTATTI:\n\n"
         "Telegram: https://t.me/CAMPANIAVIP\n"
         "WhatsApp: https://wa.me/393509741712"
     )
 
+# ================= COMANDI ADMIN =================
 async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Comando /admin migliorato"""
+    """Comando /admin"""
     if update.effective_user.id != ADMIN_ID:
         await update.message.reply_text("❌ Accesso negato. Solo l'amministratore può accedere.")
         return
@@ -153,7 +154,143 @@ async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
-# ================= PULSANTI =================
+async def aggiungi_comando(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Comando /aggiungi_comando"""
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ Accesso negato.")
+        return
+
+    if not context.args or len(context.args) < 2:
+        await update.message.reply_text(
+            "⚠️ Uso corretto: /aggiungi_comando [nome] [risposta]\n\n"
+            "Esempio: `/aggiungi_comando promo Ciao a tutti! Offerta speciale!`"
+        )
+        return
+
+    command_name = context.args[0].lower()
+    response_text = " ".join(context.args[1:])
+
+    try:
+        cursor.execute("""
+        INSERT INTO custom_commands (command_name, response_text, created_by)
+        VALUES (%s, %s, %s)
+        ON CONFLICT (command_name) DO UPDATE SET
+            response_text = EXCLUDED.response_text,
+            created_by = EXCLUDED.created_by
+        """, (command_name, response_text, update.effective_user.id))
+
+        conn.commit()
+        await update.message.reply_text(f"✅ Comando `/{command_name}` aggiunto/aggiornato con successo!")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Errore: {str(e)}")
+
+async def elimina_comando(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Comando /elimina_comando"""
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ Accesso negato.")
+        return
+
+    if not context.args or len(context.args) < 1:
+        await update.message.reply_text(
+            "⚠️ Uso corretto: /elimina_comando [nome]\n\n"
+            "Esempio: `/elimina_comando promo`"
+        )
+        return
+
+    command_name = context.args[0].lower()
+
+    cursor.execute("DELETE FROM custom_commands WHERE command_name = %s", (command_name,))
+    conn.commit()
+
+    if cursor.rowcount > 0:
+        await update.message.reply_text(f"✅ Comando `/{command_name}` eliminato con successo!")
+    else:
+        await update.message.reply_text(f"❌ Comando `/{command_name}` non trovato.")
+
+async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Comando /broadcast migliorato"""
+    if update.effective_user.id != ADMIN_ID:
+        await update.message.reply_text("❌ Accesso negato.")
+        return
+
+    if not context.args:
+        await update.message.reply_text(
+            "⚠️ Uso corretto:\n"
+            "/broadcast testo [messaggio] - Invia un messaggio di testo\n"
+            "/broadcast foto [URL] [didascalia] - Invia una foto\n"
+            "/broadcast video [URL] [didascalia] - Invia un video"
+        )
+        return
+
+    broadcast_type = context.args[0].lower()
+
+    if broadcast_type == "testo":
+        if len(context.args) < 2:
+            await update.message.reply_text("⚠️ Devi fornire un messaggio di testo.")
+            return
+
+        message = " ".join(context.args[1:])
+        user_state[update.effective_user.id] = ("broadcast_text", message)
+        await update.message.reply_text("✅ Ora invia questo messaggio a tutti gli utenti.")
+
+    elif broadcast_type == "foto":
+        if len(context.args) < 2:
+            await update.message.reply_text("⚠️ Devi fornire l'URL della foto.")
+            return
+
+        photo_url = context.args[1]
+        caption = " ".join(context.args[2:]) if len(context.args) > 2 else ""
+        user_state[update.effective_user.id] = ("broadcast_photo", photo_url, caption)
+        await update.message.reply_text("✅ Ora invia questa foto a tutti gli utenti.")
+
+    elif broadcast_type == "video":
+        if len(context.args) < 2:
+            await update.message.reply_text("⚠️ Devi fornire l'URL del video.")
+            return
+
+        video_url = context.args[1]
+        caption = " ".join(context.args[2:]) if len(context.args) > 2 else ""
+        user_state[update.effective_user.id] = ("broadcast_video", video_url, caption)
+        await update.message.reply_text("✅ Ora invia questo video a tutti gli utenti.")
+
+    else:
+        await update.message.reply_text(
+            "⚠️ Tipo di broadcast non valido. Usa:\n"
+            "testo, foto o video"
+        )
+
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Comando /stats"""
+    if update.effective_user.id != ADMIN_ID:
+        return
+
+    cursor.execute("SELECT COUNT(*) FROM users")
+    total = cursor.fetchone()[0]
+
+    cursor.execute("""
+    SELECT COUNT(*) FROM users
+    WHERE last_active > NOW() - INTERVAL '1 day'
+    """)
+    today = cursor.fetchone()[0]
+
+    cursor.execute("""
+    SELECT COUNT(*) FROM users
+    WHERE last_active > NOW() - INTERVAL '30 days'
+    """)
+    month = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM custom_commands")
+    custom_cmds = cursor.fetchone()[0]
+
+    await update.message.reply_text(
+        f"📊 STATISTICHE\n\n"
+        f"👥 Utenti totali: {total}\n"
+        f"🔥 Attivi oggi: {today}\n"
+        f"📅 Attivi questo mese: {month}\n"
+        f"➕ Comandi personalizzati: {custom_cmds}"
+    )
+
+# ================= GESTIONE PULSANTI =================
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -284,128 +421,7 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif query.data == "cancel":
         await query.edit_message_text("❌ Operazione annullata.")
 
-# ================= COMANDI PERSONALIZZATI =================
-async def handle_custom_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Gestisce i comandi personalizzati"""
-    message_text = update.message.text
-    if not message_text.startswith("/"):
-        return
-
-    command = message_text[1:].split()[0].lower()
-
-    cursor.execute("SELECT response_text FROM custom_commands WHERE command_name = %s", (command,))
-    result = cursor.fetchone()
-
-    if result:
-        await update.message.reply_text(result[0])
-
-# ================= ADMIN COMANDI =================
-async def aggiungi_comando(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Comando /aggiungi_comando"""
-    if update.effective_user.id != ADMIN_ID:
-        await update.message.reply_text("❌ Accesso negato.")
-        return
-
-    if not context.args or len(context.args) < 2:
-        await update.message.reply_text(
-            "⚠️ Uso corretto: /aggiungi_comando [nome] [risposta]\n\n"
-            "Esempio: `/aggiungi_comando promo Ciao a tutti! Offerta speciale!`"
-        )
-        return
-
-    command_name = context.args[0].lower()
-    response_text = " ".join(context.args[1:])
-
-    try:
-        cursor.execute("""
-        INSERT INTO custom_commands (command_name, response_text, created_by)
-        VALUES (%s, %s, %s)
-        ON CONFLICT (command_name) DO UPDATE SET
-            response_text = EXCLUDED.response_text,
-            created_by = EXCLUDED.created_by
-        """, (command_name, response_text, update.effective_user.id))
-
-        conn.commit()
-        await update.message.reply_text(f"✅ Comando `/{command_name}` aggiunto/aggiornato con successo!")
-    except Exception as e:
-        await update.message.reply_text(f"❌ Errore: {str(e)}")
-
-async def elimina_comando(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Comando /elimina_comando"""
-    if update.effective_user.id != ADMIN_ID:
-        await update.message.reply_text("❌ Accesso negato.")
-        return
-
-    if not context.args or len(context.args) < 1:
-        await update.message.reply_text(
-            "⚠️ Uso corretto: /elimina_comando [nome]\n\n"
-            "Esempio: `/elimina_comando promo`"
-        )
-        return
-
-    command_name = context.args[0].lower()
-
-    cursor.execute("DELETE FROM custom_commands WHERE command_name = %s", (command_name,))
-    conn.commit()
-
-    if cursor.rowcount > 0:
-        await update.message.reply_text(f"✅ Comando `/{command_name}` eliminato con successo!")
-    else:
-        await update.message.reply_text(f"❌ Comando `/{command_name}` non trovato.")
-
-# ================= BROADCAST MIGLIORATO =================
-async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Comando /broadcast migliorato per supportare testo, foto e video"""
-    if update.effective_user.id != ADMIN_ID:
-        await update.message.reply_text("❌ Accesso negato.")
-        return
-
-    if not context.args:
-        await update.message.reply_text(
-            "⚠️ Uso corretto:\n"
-            "/broadcast testo [messaggio] - Invia un messaggio di testo\n"
-            "/broadcast foto [URL] [didascalia] - Invia una foto\n"
-            "/broadcast video [URL] [didascalia] - Invia un video"
-        )
-        return
-
-    broadcast_type = context.args[0].lower()
-
-    if broadcast_type == "testo":
-        if len(context.args) < 2:
-            await update.message.reply_text("⚠️ Devi fornire un messaggio di testo.")
-            return
-
-        message = " ".join(context.args[1:])
-        user_state[update.effective_user.id] = ("broadcast_text", message)
-        await update.message.reply_text("✅ Ora invia questo messaggio a tutti gli utenti.")
-
-    elif broadcast_type == "foto":
-        if len(context.args) < 2:
-            await update.message.reply_text("⚠️ Devi fornire l'URL della foto.")
-            return
-
-        photo_url = context.args[1]
-        caption = " ".join(context.args[2:]) if len(context.args) > 2 else ""
-        user_state[update.effective_user.id] = ("broadcast_photo", photo_url, caption)
-        await update.message.reply_text("✅ Ora invia questa foto a tutti gli utenti.")
-
-    elif broadcast_type == "video":
-        if len(context.args) < 2:
-            await update.message.reply_text("⚠️ Devi fornire l'URL del video.")
-            return
-
-        video_url = context.args[1]
-        caption = " ".join(context.args[2:]) if len(context.args) > 2 else ""
-        user_state[update.effective_user.id] = ("broadcast_video", video_url, caption)
-        await update.message.reply_text("✅ Ora invia questo video a tutti gli utenti.")
-
-    else:
-        await update.message.reply_text(
-            "⚠️ Tipo di broadcast non valido. Usa:\n"
-            "testo, foto o video"
-        )
-
+# ================= GESTIONE BROADCAST =================
 async def handle_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Gestisce l'invio dei broadcast"""
     user_id = update.effective_user.id
@@ -537,39 +553,22 @@ async def send_broadcast_video(update: Update, context: ContextTypes.DEFAULT_TYP
         f"❌ Falliti: {failed}"
     )
 
-# ================= STATS =================
-async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Comando /stats"""
-    if update.effective_user.id != ADMIN_ID:
+# ================= GESTIONE COMANDI PERSONALIZZATI =================
+async def handle_custom_commands(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Gestisce i comandi personalizzati"""
+    message_text = update.message.text
+    if not message_text.startswith("/"):
         return
 
-    cursor.execute("SELECT COUNT(*) FROM users")
-    total = cursor.fetchone()[0]
+    command = message_text[1:].split()[0].lower()
 
-    cursor.execute("""
-    SELECT COUNT(*) FROM users
-    WHERE last_active > NOW() - INTERVAL '1 day'
-    """)
-    today = cursor.fetchone()[0]
+    cursor.execute("SELECT response_text FROM custom_commands WHERE command_name = %s", (command,))
+    result = cursor.fetchone()
 
-    cursor.execute("""
-    SELECT COUNT(*) FROM users
-    WHERE last_active > NOW() - INTERVAL '30 days'
-    """)
-    month = cursor.fetchone()[0]
+    if result:
+        await update.message.reply_text(result[0])
 
-    cursor.execute("SELECT COUNT(*) FROM custom_commands")
-    custom_cmds = cursor.fetchone()[0]
-
-    await update.message.reply_text(
-        f"📊 STATISTICHE\n\n"
-        f"👥 Utenti totali: {total}\n"
-        f"🔥 Attivi oggi: {today}\n"
-        f"📅 Attivi questo mese: {month}\n"
-        f"➕ Comandi personalizzati: {custom_cmds}"
-    )
-
-# ================= HANDLE =================
+# ================= GESTIONE MESSAGGI =================
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Gestore principale"""
     user_id = update.effective_user.id
@@ -592,4 +591,5 @@ def main():
 
     # Comandi admin
     app.add_handler(CommandHandler("aggiungi_comando", aggiungi_comando))
-    app.add_handler(CommandHandler("elimina_coma
+    app.add_handler(CommandHandler("elimina_comando", elimina_comando))
+    app.add_handler(CommandHandler("broa
