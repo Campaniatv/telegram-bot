@@ -1,7 +1,6 @@
 import os
 import asyncio
 import psycopg2
-from datetime import datetime, timedelta
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -14,18 +13,16 @@ TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = 1092687569
 DATABASE_URL = os.getenv("DATABASE_URL")
 
+WHATSAPP_LINK = "https://wa.me/393509741712"
+TELEGRAM_CONTACT = "https://t.me/CAMPANIAVIP"
+
 # ================= DATABASE =================
 conn = psycopg2.connect(DATABASE_URL)
 cursor = conn.cursor()
 
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS users (
-    user_id BIGINT PRIMARY KEY,
-    first_name TEXT,
-    last_name TEXT,
-    username TEXT,
-    joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    user_id BIGINT PRIMARY KEY
 )
 """)
 
@@ -39,26 +36,10 @@ CREATE TABLE IF NOT EXISTS custom_commands (
 
 conn.commit()
 
-# ================= CACHE =================
+# ================= STATE =================
 user_state = {}
 temp_cmd = {}
 temp_text = {}
-
-# ================= UTENTI =================
-def add_user(user):
-    cursor.execute("""
-    INSERT INTO users (user_id, first_name, last_name, username)
-    VALUES (%s, %s, %s, %s)
-    ON CONFLICT (user_id) DO UPDATE SET
-        first_name = EXCLUDED.first_name,
-        last_name = EXCLUDED.last_name,
-        username = EXCLUDED.username
-    """, (user.id, user.first_name, user.last_name, user.username))
-    conn.commit()
-
-def update_active(user_id):
-    cursor.execute("UPDATE users SET last_active = CURRENT_TIMESTAMP WHERE user_id=%s", (user_id,))
-    conn.commit()
 
 # ================= MENU =================
 def main_menu():
@@ -69,146 +50,144 @@ def main_menu():
 
 def admin_menu():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📊 Statistiche", callback_data="stats")],
         [InlineKeyboardButton("📢 Broadcast", callback_data="broadcast")],
-        [InlineKeyboardButton("➕ Comando", callback_data="addcmd")],
-        [InlineKeyboardButton("🗑️ Elimina comando", callback_data="delcmd")],
+        [InlineKeyboardButton("⚙️ Comandi", callback_data="cmd_menu")],
         [InlineKeyboardButton("🔙 Indietro", callback_data="back")]
     ])
 
+# ================= UTENTI =================
+def add_user(user_id):
+    cursor.execute("INSERT INTO users (user_id) VALUES (%s) ON CONFLICT DO NOTHING", (user_id,))
+    conn.commit()
+
 # ================= START =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    add_user(user)
-    update_active(user.id)
+    user_id = update.effective_user.id
+    add_user(user_id)
 
     await update.message.reply_text(
-        "👋 Benvenuto!\n\nUsa i pulsanti sotto 👇",
+        "👋 Benvenuto!",
         reply_markup=main_menu()
     )
 
-# ================= COMANDI BASE =================
+# ================= CONTATTI/CANALI =================
 async def canali(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("📢 https://t.me/AggiornamentiCampaniabot")
+    keyboard = [
+        [InlineKeyboardButton("🎬 Film", url="https://t.me/+HLygUda0f_wwNmE0")],
+        [InlineKeyboardButton("⚽ Sport", url="https://t.me/+Xv4kd5Uja0YzY2M0")]
+    ]
+    await update.message.reply_text("📢 Canali:", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def contatti(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("📞 https://t.me/CAMPANIAVIP")
+    keyboard = [
+        [InlineKeyboardButton("💬 Telegram", url=TELEGRAM_CONTACT)],
+        [InlineKeyboardButton("📱 WhatsApp", url=WHATSAPP_LINK)]
+    ]
+    await update.message.reply_text("📞 Contatti:", reply_markup=InlineKeyboardMarkup(keyboard))
 
+# ================= ADMIN =================
 async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
 
-    await update.message.reply_text(
-        "🔧 Pannello Admin",
-        reply_markup=admin_menu()
-    )
+    await update.message.reply_text("🔧 Admin", reply_markup=admin_menu())
 
-# ================= COMANDI CUSTOM =================
+# ================= SETCMD =================
 async def setcmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
 
     if not context.args:
-        await update.message.reply_text("Uso: /setcmd nome")
+        await update.message.reply_text("❌ Usa: /setcmd nome")
         return
 
     cmd = context.args[0].lower()
     temp_cmd[update.effective_user.id] = cmd
     user_state[update.effective_user.id] = "cmd_text"
 
-    await update.message.reply_text(f"Inserisci testo per /{cmd}")
+    await update.message.reply_text(f"✍️ Testo per /{cmd}")
 
+# ================= DELCMD =================
 async def delcmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
 
     if not context.args:
-        await update.message.reply_text("Uso: /delcmd nome")
         return
 
     cmd = context.args[0].lower()
     cursor.execute("DELETE FROM custom_commands WHERE command=%s", (cmd,))
     conn.commit()
 
-    await update.message.reply_text(f"✅ /{cmd} eliminato")
+    await update.message.reply_text(f"🗑️ /{cmd} eliminato")
 
-# ================= CALLBACK =================
+# ================= BOTTONI =================
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    uid = query.from_user.id
+    user_id = query.from_user.id
 
     if query.data == "canali":
-        await query.message.edit_text(
-            "📢 https://t.me/AggiornamentiCampaniabot",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="back")]])
-        )
+        keyboard = [
+            [InlineKeyboardButton("🎬 Film", url="https://t.me/+HLygUda0f_wwNmE0")],
+            [InlineKeyboardButton("⚽ Sport", url="https://t.me/+Xv4kd5Uja0YzY2M0")],
+            [InlineKeyboardButton("🔙 Indietro", callback_data="back")]
+        ]
+        await query.message.edit_text("📢 Canali:", reply_markup=InlineKeyboardMarkup(keyboard))
 
     elif query.data == "contatti":
-        await query.message.edit_text(
-            "📞 https://t.me/CAMPANIAVIP",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙", callback_data="back")]])
-        )
+        keyboard = [
+            [InlineKeyboardButton("💬 Telegram", url=TELEGRAM_CONTACT)],
+            [InlineKeyboardButton("📱 WhatsApp", url=WHATSAPP_LINK)],
+            [InlineKeyboardButton("🔙 Indietro", callback_data="back")]
+        ]
+        await query.message.edit_text("📞 Contatti:", reply_markup=InlineKeyboardMarkup(keyboard))
 
-    elif query.data == "back":
-        if uid == ADMIN_ID:
-            await query.message.edit_text("🔧 Admin", reply_markup=admin_menu())
-        else:
-            await query.message.edit_text("🏠 Menu", reply_markup=main_menu())
-
-    elif query.data == "stats":
-        cursor.execute("SELECT COUNT(*) FROM users")
-        total = cursor.fetchone()[0]
-
-        cursor.execute("SELECT COUNT(*) FROM users WHERE joined_at >= CURRENT_DATE")
-        today = cursor.fetchone()[0]
-
-        await query.message.reply_text(f"👥 Totali: {total}\n📅 Oggi: {today}")
+    elif query.data == "cmd_menu":
+        await query.message.reply_text("Usa:\n/setcmd nome\n/delcmd nome")
 
     elif query.data == "broadcast":
-        user_state[uid] = "broadcast"
-        await query.message.reply_text("Invia messaggio broadcast")
+        user_state[user_id] = "broadcast"
+        await query.message.reply_text("📢 Invia messaggio")
+
+    elif query.data == "back":
+        await query.message.edit_text("🏠 Menu", reply_markup=main_menu())
 
 # ================= HANDLE =================
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    update_active(uid)
+    user_id = update.effective_user.id
 
-    state = user_state.get(uid)
-
-    # ===== CREA COMANDO =====
-    if state == "cmd_text":
-        temp_text[uid] = update.message.text
-        user_state[uid] = "cmd_buttons"
-        await update.message.reply_text("Bottoni? (Nome - link) oppure skip")
+    # ===== COMANDI CUSTOM =====
+    if user_state.get(user_id) == "cmd_text":
+        temp_text[user_id] = update.message.text
+        user_state[user_id] = "cmd_buttons"
+        await update.message.reply_text("➕ Bottoni?\nNome - link\nOppure scrivi skip")
         return
 
-    if state == "cmd_buttons":
+    if user_state.get(user_id) == "cmd_buttons":
+        cmd = temp_cmd[user_id]
         buttons = update.message.text if update.message.text.lower() != "skip" else ""
 
         cursor.execute("""
         INSERT INTO custom_commands (command, response, buttons)
         VALUES (%s,%s,%s)
-        ON CONFLICT (command) DO UPDATE SET
-        response=EXCLUDED.response,
-        buttons=EXCLUDED.buttons
-        """, (temp_cmd[uid], temp_text[uid], buttons))
+        ON CONFLICT (command) DO UPDATE SET response=%s, buttons=%s
+        """, (cmd, temp_text[user_id], buttons, temp_text[user_id], buttons))
 
         conn.commit()
-        user_state[uid] = None
+        user_state[user_id] = None
 
-        await update.message.reply_text("✅ Comando salvato")
+        await update.message.reply_text(f"✅ /{cmd} salvato")
         return
 
     # ===== BROADCAST =====
-    if state == "broadcast":
+    if user_state.get(user_id) == "broadcast":
         cursor.execute("SELECT user_id FROM users")
         users = cursor.fetchall()
 
         sent = 0
         removed = 0
-        errors = 0
 
         for (u,) in users:
             try:
@@ -221,42 +200,37 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await asyncio.sleep(0.04)
 
             except Exception as e:
-                err = str(e).lower()
-
-                # ✅ SOLO BLOCCATI
-                if "blocked" in err or "forbidden" in err:
+                if "blocked" in str(e).lower():
                     cursor.execute("DELETE FROM users WHERE user_id=%s", (u,))
                     conn.commit()
                     removed += 1
-                else:
-                    errors += 1
 
-        user_state[uid] = None
+        user_state[user_id] = None
 
         await update.message.reply_text(
-            f"✅ Inviati: {sent}\n🚫 Bloccato: {removed}\n⚠️ Errori: {errors}"
+            f"✅ Inviati: {sent}\n🚫 Rimossi: {removed}"
         )
         return
 
-    # ===== COMANDI CUSTOM =====
-    if update.message.text and update.message.text.startswith("/"):
-        cmd = update.message.text[1:].split()[0]
+    # ===== ESECUZIONE COMANDI CUSTOM =====
+    if update.message.text:
+        text = update.message.text.replace("/", "").lower()
 
-        cursor.execute("SELECT response, buttons FROM custom_commands WHERE command=%s", (cmd,))
-        res = cursor.fetchone()
+        cursor.execute("SELECT response, buttons FROM custom_commands WHERE command=%s", (text,))
+        result = cursor.fetchone()
 
-        if res:
-            text, buttons_raw = res
+        if result:
+            response, buttons = result
+
             keyboard = []
-
-            if buttons_raw:
-                for line in buttons_raw.split("\n"):
+            if buttons:
+                for line in buttons.split("\n"):
                     if " - " in line:
-                        name, url = line.split(" - ", 1)
-                        keyboard.append([InlineKeyboardButton(name, url=url)])
+                        name, link = line.split(" - ")
+                        keyboard.append([InlineKeyboardButton(name, url=link)])
 
             await update.message.reply_text(
-                text,
+                response,
                 reply_markup=InlineKeyboardMarkup(keyboard) if keyboard else None
             )
 
@@ -274,7 +248,7 @@ def main():
     app.add_handler(CallbackQueryHandler(buttons))
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle))
 
-    print("🔥 BOT PRO ONLINE")
+    print("✅ BOT PRO ONLINE")
     app.run_polling()
 
 if __name__ == "__main__":
