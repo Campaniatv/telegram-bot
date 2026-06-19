@@ -1,8 +1,5 @@
 import os
-import asyncio
 import psycopg2
-from datetime import datetime, timedelta
-
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, ContextTypes,
@@ -19,13 +16,6 @@ conn = psycopg2.connect(DATABASE_URL)
 cursor = conn.cursor()
 
 cursor.execute("""
-CREATE TABLE IF NOT EXISTS users (
-    user_id BIGINT PRIMARY KEY,
-    joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-)
-""")
-
-cursor.execute("""
 CREATE TABLE IF NOT EXISTS custom_commands (
     command TEXT PRIMARY KEY,
     response TEXT,
@@ -33,13 +23,19 @@ CREATE TABLE IF NOT EXISTS custom_commands (
 )
 """)
 
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS users (
+    user_id BIGINT PRIMARY KEY
+)
+""")
+
 conn.commit()
 
-# ================= STATI =================
+# ================= MEMORY =================
 user_state = {}
 temp_cmd = {}
 temp_text = {}
-broadcast_data = {}
+temp_buttons = {}
 
 # ================= MENU =================
 def main_menu():
@@ -58,18 +54,16 @@ def back_menu():
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
 
-    cursor.execute("SELECT * FROM users WHERE user_id=%s", (user_id,))
-    if cursor.fetchone():
-        msg = "✅ Bot già attivo!"
-    else:
-        cursor.execute("INSERT INTO users (user_id) VALUES (%s)", (user_id,))
-        conn.commit()
-        msg = "✅ Benvenuto! Bot attivato!"
+    cursor.execute(
+        "INSERT INTO users (user_id) VALUES (%s) ON CONFLICT DO NOTHING",
+        (user_id,)
+    )
+    conn.commit()
 
-    await update.message.reply_text(msg, reply_markup=main_menu())
+    await update.message.reply_text("🏠 Menu", reply_markup=main_menu())
 
 # ================= CALLBACK =================
-async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
@@ -77,38 +71,13 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.edit_text("🏠 Menu", reply_markup=main_menu())
 
     elif query.data == "info":
-        await query.message.edit_text("ℹ️ Informazioni bot", reply_markup=back_menu())
-
-    elif query.data == "contatti":
-        await query.message.edit_text("📞 @CAMPANIAVIP", reply_markup=back_menu())
+        await query.message.edit_text("ℹ️ Informazioni del bot", reply_markup=back_menu())
 
     elif query.data == "canali":
-        keyboard = [
-            [InlineKeyboardButton("🎬 Film", url="https://t.me/+HLygUda0f_wwNmE0")],
-            [InlineKeyboardButton("⚽ Sport", url="https://t.me/+Xv4kd5Uja0YzY2M0")],
-            [InlineKeyboardButton("🔙 Indietro", callback_data="back")]
-        ]
-        await query.message.edit_text("📢 Canali", reply_markup=InlineKeyboardMarkup(keyboard))
+        await query.message.edit_text("📢 I nostri canali", reply_markup=back_menu())
 
-# ================= ADMIN =================
-async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        return
-
-    cursor.execute("SELECT COUNT(*) FROM users")
-    total = cursor.fetchone()[0]
-
-    today = datetime.now() - timedelta(days=1)
-    cursor.execute("SELECT COUNT(*) FROM users WHERE joined_at >= %s", (today,))
-    today_users = cursor.fetchone()[0]
-
-    month = datetime.now() - timedelta(days=30)
-    cursor.execute("SELECT COUNT(*) FROM users WHERE joined_at >= %s", (month,))
-    month_users = cursor.fetchone()[0]
-
-    await update.message.reply_text(
-        f"👑 ADMIN\n\n👥 Totali: {total}\n📅 Oggi: {today_users}\n📆 Mese: {month_users}"
-    )
+    elif query.data == "contatti":
+        await query.message.edit_text("📞 Contatti admin", reply_markup=back_menu())
 
 # ================= SETCMD =================
 async def setcmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -121,9 +90,9 @@ async def setcmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     cmd = context.args[0].lower()
     temp_cmd[update.effective_user.id] = cmd
-    user_state[update.effective_user.id] = "cmd_text"
+    user_state[update.effective_user.id] = "text"
 
-    await update.message.reply_text(f"✍️ Testo per /{cmd}")
+    await update.message.reply_text(f"✍️ Invia il testo per /{cmd}")
 
 # ================= DELCMD =================
 async def delcmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -134,130 +103,115 @@ async def delcmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     cmd = context.args[0].lower()
+
     cursor.execute("DELETE FROM custom_commands WHERE command=%s", (cmd,))
     conn.commit()
 
-    await update.message.reply_text(f"🗑️ /{cmd} eliminato!")
+    await update.message.reply_text(f"🗑️ /{cmd} eliminato")
 
 # ================= BROADCAST =================
 async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
 
-    user_state[update.effective_user.id] = "broadcast_msg"
-    await update.message.reply_text("📢 Invia messaggio broadcast (testo/foto/video)")
+    user_state[update.effective_user.id] = "broadcast"
+    await update.message.reply_text("📢 Invia il messaggio da mandare a tutti")
 
 # ================= HANDLE =================
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     state = user_state.get(user_id)
 
-    # ===== COMANDI CUSTOM =====
-    if state == "cmd_text":
+    # ===== CREAZIONE COMANDO =====
+    if state == "text":
         temp_text[user_id] = update.message.text
-        user_state[user_id] = "cmd_buttons"
-
-        await update.message.reply_text("➕ Bottoni?\nNome - link\nOppure skip")
+        user_state[user_id] = "buttons"
+        await update.message.reply_text("🔘 Invia bottoni (nome - link) oppure scrivi skip")
         return
 
-    if state == "cmd_buttons":
-        cmd = temp_cmd[user_id]
-        buttons = update.message.text if update.message.text.lower() != "skip" else ""
+    elif state == "buttons":
+        buttons = None
 
-        cursor.execute("""
-        INSERT INTO custom_commands (command, response, buttons)
-        VALUES (%s,%s,%s)
-        ON CONFLICT (command) DO UPDATE SET
-        response=EXCLUDED.response,
-        buttons=EXCLUDED.buttons
-        """, (cmd, temp_text[user_id], buttons))
+        if update.message.text.lower() != "skip":
+            try:
+                name, link = update.message.text.split(" - ")
+                buttons = str([[name, link]])
+            except:
+                await update.message.reply_text("❌ Formato: nome - link")
+                return
 
+        cursor.execute(
+            "INSERT INTO custom_commands (command, response, buttons) VALUES (%s,%s,%s) "
+            "ON CONFLICT (command) DO UPDATE SET response=%s, buttons=%s",
+            (
+                temp_cmd[user_id],
+                temp_text[user_id],
+                buttons,
+                temp_text[user_id],
+                buttons
+            )
+        )
         conn.commit()
-        user_state[user_id] = None
 
-        await update.message.reply_text(f"✅ /{cmd} salvato!")
+        user_state[user_id] = None
+        await update.message.reply_text("✅ Comando salvato!")
         return
 
     # ===== BROADCAST =====
-    if state == "broadcast_msg":
-        broadcast_data[user_id] = update.message
-        user_state[user_id] = "broadcast_buttons"
-
-        await update.message.reply_text("➕ Bottoni?\nNome - link\nOppure skip")
-        return
-
-    if state == "broadcast_buttons":
-        buttons_raw = update.message.text if update.message.text.lower() != "skip" else ""
-
-        keyboard = []
-        if buttons_raw:
-            for line in buttons_raw.split("\n"):
-                if " - " in line:
-                    name, url = line.split(" - ", 1)
-                    keyboard.append([InlineKeyboardButton(name, url=url)])
-
-        markup = InlineKeyboardMarkup(keyboard) if keyboard else None
-
+    elif state == "broadcast":
         cursor.execute("SELECT user_id FROM users")
         users = cursor.fetchall()
 
-        sent = 0
-
-        for (uid,) in users:
+        for u in users:
             try:
-                await context.bot.copy_message(
-                    chat_id=uid,
-                    from_chat_id=broadcast_data[user_id].chat_id,
-                    message_id=broadcast_data[user_id].message_id,
-                    reply_markup=markup
-                )
-                sent += 1
-                await asyncio.sleep(0.05)
+                if update.message.text:
+                    await context.bot.send_message(u[0], update.message.text)
+                elif update.message.photo:
+                    await context.bot.send_photo(u[0], update.message.photo[-1].file_id)
+                elif update.message.video:
+                    await context.bot.send_video(u[0], update.message.video.file_id)
             except:
                 pass
 
         user_state[user_id] = None
-
-        await update.message.reply_text(f"✅ Broadcast inviato a {sent} utenti!")
+        await update.message.reply_text("✅ Broadcast inviato!")
         return
 
-# ================= CUSTOM COMMAND =================
-async def custom_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    cmd = update.message.text[1:].split()[0]
+    # ===== COMANDI CUSTOM =====
+    if update.message.text and update.message.text.startswith("/"):
+        cmd = update.message.text[1:].split()[0]
 
-    cursor.execute("SELECT response, buttons FROM custom_commands WHERE command=%s", (cmd,))
-    res = cursor.fetchone()
+        cursor.execute("SELECT response, buttons FROM custom_commands WHERE command=%s", (cmd,))
+        row = cursor.fetchone()
 
-    if res:
-        text, buttons_raw = res
+        if row:
+            response, buttons = row
 
-        keyboard = []
-        if buttons_raw:
-            for line in buttons_raw.split("\n"):
-                if " - " in line:
-                    name, url = line.split(" - ", 1)
-                    keyboard.append([InlineKeyboardButton(name, url=url)])
+            keyboard = None
+            if buttons:
+                try:
+                    btns = eval(buttons)
+                    keyboard = InlineKeyboardMarkup([
+                        [InlineKeyboardButton(b[0], url=b[1])] for b in btns
+                    ])
+                except:
+                    pass
 
-        await update.message.reply_text(
-            text,
-            reply_markup=InlineKeyboardMarkup(keyboard) if keyboard else None
-        )
+            await update.message.reply_text(response, reply_markup=keyboard)
 
 # ================= MAIN =================
 def main():
     app = Application.builder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("admin", admin))
     app.add_handler(CommandHandler("setcmd", setcmd))
     app.add_handler(CommandHandler("delcmd", delcmd))
     app.add_handler(CommandHandler("broadcast", broadcast))
 
-    app.add_handler(CallbackQueryHandler(buttons))
-    app.add_handler(MessageHandler(filters.COMMAND, custom_command))
-    app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle))
+    app.add_handler(CallbackQueryHandler(button_handler))
+    app.add_handler(MessageHandler(filters.ALL, handle))
 
-    print("✅ BOT ULTRA PRO ONLINE")
+    print("✅ BOT ONLINE")
     app.run_polling()
 
 if __name__ == "__main__":
