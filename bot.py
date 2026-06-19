@@ -1,7 +1,7 @@
 import os
 import asyncio
 import psycopg2
-from datetime import datetime, date
+from datetime import date
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -36,13 +36,23 @@ setup_database()
 
 # ================= UTENTI =================
 def add_user(user):
-    cursor.execute("""
-    INSERT INTO users (user_id, first_name, last_name, username)
-    VALUES (%s, %s, %s, %s)
-    ON CONFLICT (user_id) DO UPDATE SET
-        last_active = CURRENT_TIMESTAMP
-    """, (user.id, user.first_name, user.last_name, user.username))
-    conn.commit()
+    cursor.execute("SELECT user_id FROM users WHERE user_id = %s", (user.id,))
+    exists = cursor.fetchone()
+
+    if exists:
+        cursor.execute("""
+        UPDATE users SET last_active = CURRENT_TIMESTAMP
+        WHERE user_id = %s
+        """, (user.id,))
+        conn.commit()
+        return False  # già esiste
+    else:
+        cursor.execute("""
+        INSERT INTO users (user_id, first_name, last_name, username)
+        VALUES (%s, %s, %s, %s)
+        """, (user.id, user.first_name, user.last_name, user.username))
+        conn.commit()
+        return True  # nuovo
 
 def update_active(user_id):
     cursor.execute("""
@@ -67,10 +77,13 @@ def back():
 
 # ================= START =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    add_user(update.effective_user)
+    user = update.effective_user
+    is_new = add_user(user)
+
+    msg = "✅ Bot attivo!" if is_new else "⚡ Bot già attivo!"
 
     await update.message.reply_text(
-        "👋 Benvenuto!\n\nScegli:",
+        f"{msg}\n\nScegli:",
         reply_markup=main_menu()
     )
 
@@ -82,18 +95,22 @@ async def contatti(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "📞 CONTATTI:\n\n"
         "Telegram: https://t.me/CAMPANIAVIP\n"
-        "WhatsApp: https://wa.me/393509741712"
+        "WhatsApp: https://wa.me/+393509741712"
     )
 
 async def canali(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [
+        [InlineKeyboardButton("🎬 Film / Serie / Sport", url="https://t.me/+HLygUda0f_wwNmE0")],
+        [InlineKeyboardButton("⚽ Solo Sport", url="https://t.me/+Xv4kd5Uja0YzY2M0")]
+    ]
+
     await update.message.reply_text(
-        "📢 CANALI:\n\n"
-        "🎬 https://t.me/CAMPANIAVIP\n"
-        "⚽ https://t.me/CAMPANIAVIP"
+        "📢 CANALI UFFICIALI:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
 async def app_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("📱 APP:\n\nDisponibile a breve 🚀")
+    await update.message.reply_text("📱 APP disponibile a breve 🚀")
 
 # ================= BOTTONI =================
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -106,26 +123,26 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("🏠 Menu:", reply_markup=main_menu())
 
     elif query.data == "promo":
-        await query.edit_message_text("🔥 PROMO ATTIVE:\n\nScrivici per offerte VIP", reply_markup=back())
+        await query.edit_message_text("🔥 PROMO ATTIVE", reply_markup=back())
 
     elif query.data == "canali":
         keyboard = [
-            [InlineKeyboardButton("🎬 Film/Serie/Sport", url="https://t.me/CAMPANIAVIP")],
-            [InlineKeyboardButton("⚽ Solo Sport", url="https://t.me/CAMPANIAVIP")],
+            [InlineKeyboardButton("🎬 Film / Serie / Sport", url="https://t.me/+HLygUda0f_wwNmE0")],
+            [InlineKeyboardButton("⚽ Solo Sport", url="https://t.me/+Xv4kd5Uja0YzY2M0")],
             [InlineKeyboardButton("🔙 Indietro", callback_data="home")]
         ]
-        await query.edit_message_text("📢 CANALI:", reply_markup=InlineKeyboardMarkup(keyboard))
+        await query.edit_message_text("📢 CANALI UFFICIALI:", reply_markup=InlineKeyboardMarkup(keyboard))
 
     elif query.data == "contatti":
         keyboard = [
             [InlineKeyboardButton("💬 Telegram", url="https://t.me/CAMPANIAVIP")],
-            [InlineKeyboardButton("📱 WhatsApp", url="https://wa.me/393509741712")],
+            [InlineKeyboardButton("📱 WhatsApp", url="https://wa.me/+393509741712")],
             [InlineKeyboardButton("🔙 Indietro", callback_data="home")]
         ]
         await query.edit_message_text("📞 CONTATTI:", reply_markup=InlineKeyboardMarkup(keyboard))
 
     elif query.data == "app":
-        await query.edit_message_text("📱 APP DISPONIBILE A BREVE", reply_markup=back())
+        await query.edit_message_text("📱 APP disponibile a breve", reply_markup=back())
 
     elif query.data == "stats" and uid == ADMIN_ID:
         today = date.today()
@@ -218,7 +235,7 @@ def main():
     app.add_handler(CallbackQueryHandler(buttons))
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle))
 
-    print("✅ BOT ONLINE")
+    print("✅ BOT ONLINE PERFETTO")
     app.run_polling()
 
 if __name__ == "__main__":
