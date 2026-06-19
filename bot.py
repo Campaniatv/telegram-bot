@@ -250,7 +250,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
         users = cursor.fetchall()
 
         sent = 0
-        blocked = 0  # Contatore per utenti che bloccano il bot
+        blocked = 0
 
         for (uid,) in users:
             try:
@@ -262,7 +262,6 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 sent += 1
                 await asyncio.sleep(0.05)
             except Exception as e:
-                # Non rimuove più l'utente dal database
                 blocked += 1
                 print(f"⚠️ Utente {uid} ha bloccato il bot o c'è stato un errore: {e}")
 
@@ -292,39 +291,58 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("⚠️ Usa: rimuovi_comando [nome_comando]")
         user_state[user_id] = None
 
-# ================= MAIN (GESTIONE SICURA EVENT LOOP) =================
-async def main_async():
-    setup_database()
-    app = Application.builder().token(TOKEN).build()
-
-    # Comandi principali
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("info", info))
-    app.add_handler(CommandHandler("canali", canali))
-    app.add_handler(CommandHandler("contatti", contatti))
-    app.add_handler(CommandHandler("admin", admin))
-
-    # Comandi admin
-    app.add_handler(CommandHandler("stats", stats))
-    app.add_handler(CommandHandler("broadcast", broadcast))
-
-    # Pulsanti e messaggi
-    app.add_handler(CallbackQueryHandler(buttons))
-    app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle))
-
-    print("✅ BOT ONLINE PERFETTO")
-    await app.run_polling()
-
+# ================= MAIN CON GESTIONE SICURA =================
 def main():
+    import logging
+    logging.basicConfig(
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        level=logging.INFO
+    )
+    logger = logging.getLogger(__name__)
+
+    setup_database()
+
     try:
-        if not asyncio.get_event_loop().is_running():
-            asyncio.run(main_async())
+        # Controlla se l'event loop è già in esecuzione
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            logger.warning("Event loop già in esecuzione - creazione nuova task")
+            asyncio.create_task(start_bot())
         else:
-            print("⚠️ Event loop già in esecuzione - riavvio in corso...")
-            loop = asyncio.get_event_loop()
-            loop.create_task(main_async())
+            logger.info("Avvio nuovo event loop")
+            loop.run_until_complete(start_bot())
+    except RuntimeError as e:
+        if "This event loop is already running" in str(e):
+            logger.warning("Event loop già in esecuzione - creazione nuova task")
+            asyncio.create_task(start_bot())
+        else:
+            raise
+
+async def start_bot():
+    """Funzione separata per l'avvio del bot"""
+    try:
+        app = Application.builder().token(TOKEN).build()
+
+        # Comandi principali
+        app.add_handler(CommandHandler("start", start))
+        app.add_handler(CommandHandler("info", info))
+        app.add_handler(CommandHandler("canali", canali))
+        app.add_handler(CommandHandler("contatti", contatti))
+        app.add_handler(CommandHandler("admin", admin))
+
+        # Comandi admin
+        app.add_handler(CommandHandler("stats", stats))
+        app.add_handler(CommandHandler("broadcast", broadcast))
+
+        # Pulsanti e messaggi
+        app.add_handler(CallbackQueryHandler(buttons))
+        app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle))
+
+        print("✅ BOT ONLINE PERFETTO")
+        await app.run_polling()
+
     except Exception as e:
-        print(f"❌ Errore nel bot: {e}")
+        print(f"❌ ERRORE NEL BOT: {e}")
         raise
 
 if __name__ == "__main__":
