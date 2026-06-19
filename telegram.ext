@@ -1,0 +1,55 @@
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ContextTypes
+from database import add_user
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    add_user(update.effective_user)
+
+    keyboard = [
+        [InlineKeyboardButton("ℹ️ Info", callback_data="info")],
+        [InlineKeyboardButton("📢 Canali", callback_data="canali")],
+        [InlineKeyboardButton("📞 Contatti", callback_data="contatti")]
+    ]
+
+    await update.message.reply_text(
+        "👋 Benvenuto!\n\nScegli un'opzione:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "ℹ️ INFO\n\n"
+        "In questo canale troverai comunicazioni ufficiali, aggiornamenti, avvisi e promozioni pubblicate periodicamente.\n\n"
+        "Resta iscritto per non perdere nessuna novità."
+    )
+
+async def canali(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                "🎬 Film / Serie / Sport",
+                url="https://t.me/+HLygUda0f_wwNmE0"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "⚽ Solo Sport",
+                url="https://t.me/+Xv4kd5Uja0YzY2M0"
+            )
+        ]
+    ]
+
+    await update.message.reply_text(
+        "📢 CANALI UFFICIALI\n\n"
+        "🎬 Film, Serie TV e Sport\n"
+        "⚽ Solo Sport\n\n"
+        "Scegli il canale che preferisci:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+async def contatti(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "📞 CONTATTI:\n\n"
+        "Telegram: https://t.me/CAMPANIAVIP\n"
+        "WhatsApp: https://wa.me/393509741712"
+    )
