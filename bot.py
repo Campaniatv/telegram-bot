@@ -1,78 +1,270 @@
 import os
 import asyncio
-from telegram import Update
+import psycopg2
+
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    Application,
-    CommandHandler,
-    MessageHandler,
-    filters,
-    ContextTypes,
+    Application, CommandHandler, ContextTypes,
+    CallbackQueryHandler, MessageHandler, filters
 )
-import logging
 
-# Configura il logging
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
-logger = logging.getLogger(__name__)
-
-# Variabili d'ambiente
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
+# ================= CONFIG =================
+TOKEN = os.getenv("BOT_TOKEN")
+ADMIN_ID = 1092687569
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-# Comandi personalizzati
+# ================= DATABASE =================
+conn = psycopg2.connect(DATABASE_URL)
+cursor = conn.cursor()
+
+def setup_database():
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        user_id BIGINT PRIMARY KEY,
+        first_name TEXT,
+        last_name TEXT,
+        username TEXT,
+        joined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
+    conn.commit()
+
+setup_database()
+
+# ================= UTENTI =================
+def add_user(user):
+    cursor.execute("""
+    INSERT INTO users (user_id, first_name, last_name, username)
+    VALUES (%s, %s, %s, %s)
+    ON CONFLICT (user_id) DO UPDATE SET
+        first_name = EXCLUDED.first_name,
+        last_name = EXCLUDED.last_name,
+        username = EXCLUDED.username,
+        last_active = CURRENT_TIMESTAMP
+    """, (user.id, user.first_name, user.last_name, user.username))
+    conn.commit()
+
+def update_active(user_id):
+    cursor.execute("""
+    UPDATE users SET last_active = CURRENT_TIMESTAMP
+    WHERE user_id = %s
+    """, (user_id,))
+    conn.commit()
+
+# ================= STATO =================
+user_state = {}
+
+# ================= START =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 Ciao! Sono un bot Telegram!")
+    add_user(update.effective_user)
 
+    keyboard = [
+        [InlineKeyboardButton("ℹ️ Info", callback_data="info")],
+        [InlineKeyboardButton("📢 Canali", callback_data="canali")],
+        [InlineKeyboardButton("📞 Contatti", callback_data="contatti")]
+    ]
+
+    await update.message.reply_text(
+        "👋 Benvenuto!\n\nScegli un'opzione:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+# ================= COMANDI =================
+async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "ℹ️ INFO\n\n"
+        "In questo canale troverai comunicazioni ufficiali, aggiornamenti, avvisi e promozioni pubblicate periodicamente.\n\n"
+        "Resta iscritto per non perdere nessuna novità."
+    )
+
+async def contatti(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "📞 CONTATTI:\n\n"
+        "Telegram: https://t.me/CAMPANIAVIP\n"
+        "WhatsApp: https://wa.me/393509741712"
+    )
+
+# ================= PULSANTI =================
+async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    if query.data == "info":
+        await query.edit_message_text(
+            "ℹ️ INFO\n\n"
+            "In questo canale troverai comunicazioni ufficiali, aggiornamenti, avvisi e promozioni pubblicate periodicamente.\n\n"
+            "Resta iscritto per non perdere nessuna novità."
+        )
+
+    elif query.data == "canali":
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    "🎬 Film / Serie / Sport",
+                    url="https://t.me/+HLygUda0f_wwNmE0"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "⚽ Solo Sport",
+                    url="https://t.me/+Xv4kd5Uja0YzY2M0"
+                )
+            ]
+        ]
+
+        await query.edit_message_text(
+            "📢 CANALI UFFICIALI\n\n"
+            "🎬 Film, Serie TV e Sport\n"
+            "⚽ Solo Sport\n\n"
+            "Scegli il canale che preferisci:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    elif query.data == "contatti":
+        await query.edit_message_text(
+            "📞 CONTATTI:\n\n"
+            "Telegram: https://t.me/CAMPANIAVIP\n"
+            "WhatsApp: https://wa.me/393509741712"
+        )
+
+    elif query.data == "stats":
+        if update.effective_user.id != ADMIN_ID:
+            return
+
+        cursor.execute("SELECT COUNT(*) FROM users")
+        total = cursor.fetchone()[0]
+
+        cursor.execute("""
+        SELECT COUNT(*) FROM users
+        WHERE last_active > NOW() - INTERVAL '1 day'
+        """)
+        today = cursor.fetchone()[0]
+
+        cursor.execute("""
+        SELECT COUNT(*) FROM users
+        WHERE last_active > NOW() - INTERVAL '30 days'
+        """)
+        month = cursor.fetchone()[0]
+
+        await query.edit_message_text(
+            f"📊 STATISTICHE\n\n"
+            f"👥 Totali: {total}\n"
+            f"🔥 Oggi: {today}\n"
+            f"📅 Mese: {month}"
+        )
+
+    elif query.data == "broadcast":
+        if update.effective_user.id != ADMIN_ID:
+            return
+
+        user_state[update.effective_user.id] = "broadcast"
+
+        await query.edit_message_text(
+            "📢 Invia adesso il messaggio da inviare a tutti gli utenti."
+        )
+
+# ================= ADMIN =================
 async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.message.from_user.id) != str(ADMIN_ID):
-        await update.message.reply_text("❌ Non sei autorizzato!")
+    if update.effective_user.id != ADMIN_ID:
         return
-    await update.message.reply_text("🔑 Sei un admin!")
 
+    keyboard = [
+        [InlineKeyboardButton("📊 Statistiche", callback_data="stats")],
+        [InlineKeyboardButton("📢 Broadcast", callback_data="broadcast")]
+    ]
+
+    await update.message.reply_text(
+        "🔧 PANNELLO ADMIN",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+# ================= STATS =================
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+
+    cursor.execute("SELECT COUNT(*) FROM users")
+    total = cursor.fetchone()[0]
+
+    cursor.execute("""
+    SELECT COUNT(*) FROM users
+    WHERE last_active > NOW() - INTERVAL '1 day'
+    """)
+    today = cursor.fetchone()[0]
+
+    cursor.execute("""
+    SELECT COUNT(*) FROM users
+    WHERE last_active > NOW() - INTERVAL '30 days'
+    """)
+    month = cursor.fetchone()[0]
+
+    await update.message.reply_text(
+        f"📊 STATISTICHE\n\n"
+        f"👥 Totali: {total}\n"
+        f"🔥 Oggi: {today}\n"
+        f"📅 Mese: {month}"
+    )
+
+# ================= BROADCAST =================
 async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.message.from_user.id) != str(ADMIN_ID):
-        await update.message.reply_text("❌ Non sei autorizzato!")
+    if update.effective_user.id != ADMIN_ID:
         return
 
-    if not context.args:
-        await update.message.reply_text("⚠️ Usa: /broadcast <messaggio>")
-        return
+    user_state[update.effective_user.id] = "broadcast"
 
-    message = " ".join(context.args)
-    await update.message.reply_text(f"📢 Inviando broadcast: {message}")
+    await update.message.reply_text(
+        "📢 Invia il messaggio da inviare a tutti"
+    )
 
-    # Qui aggiungerai il codice per inviare a tutti gli utenti
-    await update.message.reply_text("✅ Broadcast inviato!")
+# ================= HANDLE =================
+async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    update_active(user_id)
 
-# Funzione principale
-async def main():
-    try:
-        # Crea l'applicazione
-        application = Application.builder().token(BOT_TOKEN).build()
+    if user_state.get(user_id) == "broadcast":
+        cursor.execute("SELECT user_id FROM users")
+        users = cursor.fetchall()
 
-        # Aggiungi comandi
-        application.add_handler(CommandHandler("start", start))
-        application.add_handler(CommandHandler("admin", admin))
-        application.add_handler(CommandHandler("broadcast", broadcast))
+        sent = 0
+        removed = 0
 
-        # Avvia il bot
-        logger.info("🚀 Avvio del bot in corso...")
-        await application.run_polling()
-        logger.info("✅ BOT ONLINE PERFETTO!")
+        for (uid,) in users:
+            try:
+                await context.bot.copy_message(
+                    chat_id=uid,
+                    from_chat_id=update.effective_chat.id,
+                    message_id=update.message.message_id
+                )
+                sent += 1
+                await asyncio.sleep(0.05)
+            except:
+                cursor.execute("DELETE FROM users WHERE user_id = %s", (uid,))
+                conn.commit()
+                removed += 1
 
-    except Exception as e:
-        logger.error(f"❌ Errore nel bot: {e}")
-        raise
+        user_state[user_id] = None
 
-# Avvio sicuro dell'event loop
+        await update.message.reply_text(
+            f"✅ Inviato: {sent}\n🧹 Rimossi: {removed}"
+        )
+
+# ================= MAIN =================
+def main():
+    app = Application.builder().token(TOKEN).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("info", info))
+    app.add_handler(CommandHandler("contatti", contatti))
+    app.add_handler(CommandHandler("admin", admin))
+    app.add_handler(CommandHandler("broadcast", broadcast))
+    app.add_handler(CommandHandler("stats", stats))
+
+    app.add_handler(CallbackQueryHandler(buttons))
+    app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle))
+
+    print("✅ BOT ONLINE PERFETTO")
+    app.run_polling()
+
 if __name__ == "__main__":
-    # Questo previene il problema "event loop already running"
-    if not asyncio.get_event_loop().is_running():
-        asyncio.run(main())
-    else:
-        logger.warning("⚠️ Event loop già in esecuzione - riavvio in corso...")
-        loop = asyncio.get_event_loop()
-        loop.create_task(main())
+    main()
