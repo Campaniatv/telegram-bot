@@ -1,12 +1,29 @@
 import os
 import psycopg2
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, ContextTypes, filters
+from telegram import (
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    BotCommand
+)
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    CallbackQueryHandler,
+    MessageHandler,
+    ContextTypes,
+    filters
+)
 
 # ================= CONFIG =================
 TOKEN = os.getenv("BOT_TOKEN")
 ADMIN_ID = 1092687569
 DATABASE_URL = os.getenv("DATABASE_URL")
+
+if not TOKEN:
+    raise RuntimeError("BOT_TOKEN mancante nelle variabili di ambiente.")
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL mancante nelle variabili di ambiente.")
 
 # ================= DATABASE =================
 conn = psycopg2.connect(DATABASE_URL)
@@ -14,20 +31,75 @@ cursor = conn.cursor()
 
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS users (
-    user_id BIGINT PRIMARY KEY
+    user_id BIGINT PRIMARY KEY,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )
 """)
 
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS custom_commands (
     command TEXT PRIMARY KEY,
-    text TEXT
+    text TEXT NOT NULL
 )
 """)
 
 conn.commit()
 
+def db_touch_user(user_id: int):
+    cursor.execute("""
+    INSERT INTO users (user_id, last_active)
+    VALUES (%s, CURRENT_TIMESTAMP)
+    ON CONFLICT (user_id) DO UPDATE SET last_active=CURRENT_TIMESTAMP
+    """, (user_id,))
+    conn.commit()
+
+def db_get_custom_text(cmd: str):
+    cursor.execute("SELECT text FROM custom_commands WHERE command=%s", (cmd,))
+    row = cursor.fetchone()
+    return row[0] if row else None
+
+def db_set_custom_text(cmd: str, text: str):
+    cursor.execute("""
+    INSERT INTO custom_commands (command, text)
+    VALUES (%s, %s)
+    ON CONFLICT (command) DO UPDATE SET text=EXCLUDED.text
+    """, (cmd, text))
+    conn.commit()
+
+def db_del_custom_text(cmd: str):
+    cursor.execute("DELETE FROM custom_commands WHERE command=%s", (cmd,))
+    conn.commit()
+
+def db_count_users():
+    cursor.execute("SELECT COUNT(*) FROM users")
+    return cursor.fetchone()[0]
+
+def db_count_today_users():
+    cursor.execute("""
+    SELECT COUNT(*) FROM users
+    WHERE last_active::date = CURRENT_DATE
+    """)
+    return cursor.fetchone()[0]
+
+def db_count_month_users():
+    cursor.execute("""
+    SELECT COUNT(*) FROM users
+    WHERE last_active >= date_trunc('month', CURRENT_DATE)
+    """)
+    return cursor.fetchone()[0]
+
+def db_fetch_all_user_ids():
+    cursor.execute("SELECT user_id FROM users")
+    return [r[0] for r in cursor.fetchall()]
+
+def is_blocked_error(e) -> bool:
+    # Gestiamo i casi tipici: forbidden/blocked/user deactivated
+    msg = str(e).lower()
+    return ("forbidden" in msg) or ("blocked" in msg) or ("bot was blocked" in msg) or ("user is deactivated" in msg)
+
 # ================= STATI =================
+# user_state: { user_id: "addcmd_name" | "addcmd_text" | "delcmd" | "broadcast" | None }
 user_state = {}
 temp_data = {}
 
@@ -61,14 +133,26 @@ def contatti_menu():
         [InlineKeyboardButton("🔙 Indietro", callback_data="back")]
     ])
 
-# ================= START =================
+# ================= UTIL =================
+async def safe_edit_text(query, text, reply_markup=None, parse_mode=None):
+    try:
+        await query.message.edit_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+    except Exception:
+        # Se edit fallisce (es. stesso testo), prova a inviare invece di editare
+        await query.message.reply_text(text, reply_markup=reply_markup, parse_mode=parse_mode)
+
+async def set_bot_commands(app: Application):
+    await app.bot.set_my_commands([
+        BotCommand("start", "Avvia bot"),
+        BotCommand("canali", "Vedi canali"),
+        BotCommand("contatti", "Contatti"),
+        BotCommand("admin", "Pannello admin")
+    ])
+
+# ================= START COMMAND =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-
-    cursor.execute("SELECT * FROM users WHERE user_id=%s", (user_id,))
-    if not cursor.fetchone():
-        cursor.execute("INSERT INTO users (user_id) VALUES (%s)", (user_id,))
-        conn.commit()
+    db_touch_user(user_id)
 
     await update.message.reply_text(
         "🏠 *Benvenuto nel bot!*",
@@ -76,132 +160,193 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
 
-# ================= COMANDI =================
+# ================= CANALI COMMAND =================
 async def canali(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("📢 *I nostri canali:*", reply_markup=canali_menu(), parse_mode="Markdown")
+    db_touch_user(update.effective_user.id)
 
+    await update.message.reply_text(
+        "📢 *I nostri canali:*",
+        reply_markup=canali_menu(),
+        parse_mode="Markdown"
+    )
+
+# ================= CONTATTI COMMAND =================
 async def contatti(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("📞 *Contatti:*", reply_markup=contatti_menu(), parse_mode="Markdown")
+    db_touch_user(update.effective_user.id)
 
+    await update.message.reply_text(
+        "📞 *Contatti:*",
+        reply_markup=contatti_menu(),
+        parse_mode="Markdown"
+    )
+
+# ================= ADMIN COMMAND =================
 async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
+    user_id = update.effective_user.id
+    if user_id != ADMIN_ID:
         return
+    await update.message.reply_text(
+        "🔧 *Pannello Admin*",
+        reply_markup=admin_menu(),
+        parse_mode="Markdown"
+    )
 
-    await update.message.reply_text("🔧 *Pannello Admin*", reply_markup=admin_menu(), parse_mode="Markdown")
-
-# ================= BOTTONI =================
+# ================= CALLBACK BUTTONS =================
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
     user_id = query.from_user.id
+    data = query.data
 
-    if query.data == "canali":
-        await query.message.edit_text("📢 *Scegli un canale:*", reply_markup=canali_menu(), parse_mode="Markdown")
+    if data == "canali":
+        await safe_edit_text(
+            query,
+            "📢 *Scegli un canale:*",
+            reply_markup=canali_menu(),
+            parse_mode="Markdown"
+        )
 
-    elif query.data == "contatti":
-        await query.message.edit_text("📞 *Contatti:*", reply_markup=contatti_menu(), parse_mode="Markdown")
+    elif data == "contatti":
+        await safe_edit_text(
+            query,
+            "📞 *Contatti:*",
+            reply_markup=contatti_menu(),
+            parse_mode="Markdown"
+        )
 
-    elif query.data == "back":
+    elif data == "back":
         if user_id == ADMIN_ID:
-            await query.message.edit_text("🔧 *Pannello Admin*", reply_markup=admin_menu(), parse_mode="Markdown")
+            await safe_edit_text(query, "🔧 *Pannello Admin*", reply_markup=admin_menu(), parse_mode="Markdown")
         else:
-            await query.message.edit_text("🏠 *Menu principale*", reply_markup=main_menu(), parse_mode="Markdown")
+            await safe_edit_text(query, "🏠 *Menu principale*", reply_markup=main_menu(), parse_mode="Markdown")
 
-    elif query.data == "stats":
+    elif data == "stats":
         if user_id != ADMIN_ID:
             return
-        cursor.execute("SELECT COUNT(*) FROM users")
-        total = cursor.fetchone()[0]
-        await query.message.edit_text(f"👥 Utenti totali: {total}", reply_markup=admin_menu())
+        total = db_count_users()
+        today = db_count_today_users()
+        month = db_count_month_users()
 
-    elif query.data == "broadcast":
+        await safe_edit_text(
+            query,
+            f"📊 *Statistiche*\n\n👥 Totali: {total}\n📅 Oggi: {today}\n🗓 Mese: {month}",
+            reply_markup=admin_menu(),
+            parse_mode="Markdown"
+        )
+
+    elif data == "broadcast":
+        if user_id != ADMIN_ID:
+            return
         user_state[user_id] = "broadcast"
-        await query.message.reply_text("📢 Invia il messaggio da inviare a tutti")
+        await query.message.reply_text("📢 Invia ora il *messaggio* da broadcast (testo).")
 
-    elif query.data == "addcmd":
+    elif data == "addcmd":
+        if user_id != ADMIN_ID:
+            return
         user_state[user_id] = "addcmd_name"
-        await query.message.reply_text("✏️ Scrivi il nome comando (senza /)")
+        await query.message.reply_text("➕ Scrivi il *nome comando* (senza /). Esempio: `pippo`")
 
-    elif query.data == "delcmd":
+    elif data == "delcmd":
+        if user_id != ADMIN_ID:
+            return
         user_state[user_id] = "delcmd"
-        await query.message.reply_text("❌ Scrivi il comando da eliminare")
+        await query.message.reply_text("❌ Scrivi il *nome comando* da eliminare (senza /).")
 
-# ================= HANDLE =================
+# ================= MESSAGE HANDLER =================
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    text = update.message.text
+    db_touch_user(user_id)
 
-    # ===== ADD CMD =====
-    if user_state.get(user_id) == "addcmd_name":
-        temp_data[user_id] = text.lower()
-        user_state[user_id] = "addcmd_text"
-        await update.message.reply_text("📝 Ora scrivi il testo del comando")
+    # deve essere testo per i nostri stati (add/del/broadcast)
+    if not update.message or not update.message.text:
         return
 
-    elif user_state.get(user_id) == "addcmd_text":
-        cmd = temp_data[user_id]
-        cursor.execute(
-            "INSERT INTO custom_commands VALUES (%s,%s) ON CONFLICT (command) DO UPDATE SET text=%s",
-            (cmd, text, text)
-        )
-        conn.commit()
+    text = update.message.text.strip()
+
+    # ===== ADD CMD NAME =====
+    if user_state.get(user_id) == "addcmd_name":
+        cmd = text.lower().lstrip("/")
+        if not cmd:
+            await update.message.reply_text("❌ Nome comando non valido.")
+            user_state[user_id] = None
+            return
+
+        temp_data[user_id] = cmd
+        user_state[user_id] = "addcmd_text"
+        await update.message.reply_text("📝 Ora scrivi *il testo* che deve rispondere al comando /" + cmd, parse_mode="Markdown")
+        return
+
+    # ===== ADD CMD TEXT =====
+    if user_state.get(user_id) == "addcmd_text":
+        cmd = temp_data.get(user_id)
+        if not cmd:
+            user_state[user_id] = None
+            return
+
+        db_set_custom_text(cmd, text)
         user_state[user_id] = None
-        await update.message.reply_text(f"✅ Comando /{cmd} salvato")
+        temp_data.pop(user_id, None)
+
+        await update.message.reply_text(f"✅ Comando /{cmd} salvato.", parse_mode="Markdown")
         return
 
     # ===== DELETE CMD =====
-    elif user_state.get(user_id) == "delcmd":
-        cursor.execute("DELETE FROM custom_commands WHERE command=%s", (text.lower(),))
-        conn.commit()
+    if user_state.get(user_id) == "delcmd":
+        cmd = text.lower().lstrip("/")
+        if not cmd:
+            await update.message.reply_text("❌ Nome comando non valido.")
+            user_state[user_id] = None
+            return
+
+        db_del_custom_text(cmd)
         user_state[user_id] = None
-        await update.message.reply_text("❌ Comando eliminato")
+        await update.message.reply_text(f"❌ Comando /{cmd} eliminato.", parse_mode="Markdown")
         return
 
     # ===== BROADCAST =====
-    elif user_state.get(user_id) == "broadcast":
-        cursor.execute("SELECT user_id FROM users")
-        users = cursor.fetchall()
+    if user_state.get(user_id) == "broadcast":
+        if user_id != ADMIN_ID:
+            user_state[user_id] = None
+            return
+
+        # broadcast SOLO testo
+        all_ids = db_fetch_all_user_ids()
 
         sent = 0
         removed = 0
 
-        for u in users:
-            uid = u[0]
+        for uid in all_ids:
             try:
                 await context.bot.send_message(uid, text)
                 sent += 1
-            except:
-                cursor.execute("DELETE FROM users WHERE user_id=%s", (uid,))
-                conn.commit()
-                removed += 1
+            except Exception as e:
+                if is_blocked_error(e):
+                    cursor.execute("DELETE FROM users WHERE user_id=%s", (uid,))
+                    conn.commit()
+                    removed += 1
+                else:
+                    # Non rimuoviamo altri utenti se errore generico
+                    pass
 
         user_state[user_id] = None
-        await update.message.reply_text(f"✅ Inviati: {sent}\n🚫 Rimossi: {removed}")
+        await update.message.reply_text(f"✅ Broadcast completato!\n📨 Inviati: {sent}\n🚫 Rimossi (bloccano): {removed}")
         return
 
-    # ===== CUSTOM CMD =====
+    # ===== CUSTOM COMMAND ANSWER =====
+    # Risponde SOLO ai messaggi che iniziano con "/nome"
     if text.startswith("/"):
-        cmd = text.replace("/", "")
-        cursor.execute("SELECT text FROM custom_commands WHERE command=%s", (cmd,))
-        res = cursor.fetchone()
-        if res:
-            await update.message.reply_text(res[0])
-
-# ================= COMANDI MENU =================
-async def set_commands(app):
-    await app.bot.set_my_commands([
-        BotCommand("start", "Avvia bot"),
-        BotCommand("canali", "Vedi canali"),
-        BotCommand("contatti", "Contatti"),
-        BotCommand("admin", "Admin")
-    ])
+        cmd = text.split()[0].replace("/", "").lower()
+        reply_text = db_get_custom_text(cmd)
+        if reply_text:
+            await update.message.reply_text(reply_text)
 
 # ================= MAIN =================
 def main():
     app = Application.builder().token(TOKEN).build()
 
-    app.post_init = set_commands
+    # imposta comandi visibili in Telegram
+    app.post_init = set_bot_commands
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("canali", canali))
@@ -209,9 +354,10 @@ def main():
     app.add_handler(CommandHandler("admin", admin))
 
     app.add_handler(CallbackQueryHandler(buttons))
+    # gestiamo tutti i messaggi testuali non-comando
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle))
 
-    print("✅ BOT ONLINE PRO")
+    print("✅ BOT PRO ONLINE (PRO).")
     app.run_polling()
 
 if __name__ == "__main__":
