@@ -1,25 +1,24 @@
 import os
 import asyncio
 import psycopg2
+
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, ContextTypes,
     CallbackQueryHandler, MessageHandler, filters
 )
+from telegram.error import Forbidden, BadRequest
 
 # ================= CONFIG =================
 TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID = int(os.getenv("ADMIN_ID", "1092687569"))
+ADMIN_ID = 1092687569
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 # ================= DATABASE =================
-conn = None
-cursor = None
+conn = psycopg2.connect(DATABASE_URL)
+cursor = conn.cursor()
 
 def setup_database():
-    global conn, cursor
-    conn = psycopg2.connect(DATABASE_URL)
-    cursor = conn.cursor()
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS users (
         user_id BIGINT PRIMARY KEY,
@@ -31,6 +30,8 @@ def setup_database():
     )
     """)
     conn.commit()
+
+setup_database()
 
 # ================= UTENTI =================
 def add_user(user):
@@ -52,205 +53,105 @@ def update_active(user_id):
     """, (user_id,))
     conn.commit()
 
+# ================= MENU =================
+def main_menu():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("ℹ️ Info", callback_data="info")],
+        [InlineKeyboardButton("📢 Canali", callback_data="canali")],
+        [InlineKeyboardButton("📞 Contatti", callback_data="contatti")]
+    ])
+
+def back():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔙 Indietro", callback_data="home")]
+    ])
+
 # ================= STATO =================
 user_state = {}
 
-# ================= COMANDI PRINCIPALI =================
+# ================= START =================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     add_user(update.effective_user)
-    keyboard = [
-        [InlineKeyboardButton("ℹ️ Info", callback_data="info")],
-        [InlineKeyboardButton("📢 Canali", callback_data="canali")],
-        [InlineKeyboardButton("📞 Contatti", callback_data="contatti")],
-        [InlineKeyboardButton("🔑 Admin", callback_data="admin")]
-    ]
+
     await update.message.reply_text(
         "👋 Benvenuto!\n\nScegli un'opzione:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
+        reply_markup=main_menu()
     )
 
-async def info(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "ℹ️ INFO\n\n"
-        "In questo canale troverai comunicazioni ufficiali, aggiornamenti, avvisi e promozioni pubblicate periodicamente.\n\n"
-        "Resta iscritto per non perdere nessuna novità."
-    )
-
-async def canali(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [
-        [
-            InlineKeyboardButton(
-                "🎬 Film / Serie / Sport",
-                url="https://t.me/+HLygUda0f_wwNmE0"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "⚽ Solo Sport",
-                url="https://t.me/+Xv4kd5Uja0YzY2M0"
-            )
-        ]
-    ]
-    await update.message.reply_text(
-        "📢 CANALI UFFICIALI\n\n"
-        "🎬 Film, Serie TV e Sport\n"
-        "⚽ Solo Sport\n\n"
-        "Scegli il canale che preferisci:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
-    )
-
-async def contatti(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "📞 CONTATTI:\n\n"
-        "Telegram: @CAMPANIAVIP\n"
-        "WhatsApp: https://wa.me/393509741712"
-    )
-
-# ================= PULSANTI =================
+# ================= BUTTONS =================
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    if query.data == "info":
+    if query.data == "home":
         await query.edit_message_text(
-            "ℹ️ INFO\n\n"
-            "In questo canale troverai comunicazioni ufficiali, aggiornamenti, avvisi e promozioni pubblicate periodicamente.\n\n"
-            "Resta iscritto per non perdere nessuna novità."
+            "🏠 Menu principale:",
+            reply_markup=main_menu()
+        )
+
+    elif query.data == "info":
+        await query.edit_message_text(
+            "ℹ️ INFO\n\nResta aggiornato su tutte le novità.",
+            reply_markup=back()
         )
 
     elif query.data == "canali":
         keyboard = [
-            [
-                InlineKeyboardButton(
-                    "🎬 Film / Serie / Sport",
-                    url="https://t.me/+HLygUda0f_wwNmE0"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    "⚽ Solo Sport",
-                    url="https://t.me/+Xv4kd5Uja0YzY2M0"
-                )
-            ]
+            [InlineKeyboardButton("🎬 Film / Serie / Sport", url="https://t.me/+HLygUda0f_wwNmE0")],
+            [InlineKeyboardButton("⚽ Solo Sport", url="https://t.me/+Xv4kd5Uja0YzY2M0")],
+            [InlineKeyboardButton("🔙 Indietro", callback_data="home")]
         ]
-        await query.edit_message_text(
-            "📢 CANALI UFFICIALI\n\n"
-            "🎬 Film, Serie TV e Sport\n"
-            "⚽ Solo Sport\n\n"
-            "Scegli il canale che preferisci:",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
+        await query.edit_message_text("📢 CANALI:", reply_markup=InlineKeyboardMarkup(keyboard))
 
     elif query.data == "contatti":
         await query.edit_message_text(
-            "📞 CONTATTI:\n\n"
-            "Telegram: @CAMPANIAVIP\n"
-            "WhatsApp: https://wa.me/393509741712"
+            "📞 Contatti:\nTelegram: @CAMPANIAVIP",
+            reply_markup=back()
         )
 
-    elif query.data == "admin":
-        if query.from_user.id != ADMIN_ID:
-            await query.edit_message_text("❌ Non sei autorizzato!")
+    elif query.data == "stats":
+        if update.effective_user.id != ADMIN_ID:
             return
-        keyboard = [
-            [InlineKeyboardButton("📊 Statistiche", callback_data="stats")],
-            [InlineKeyboardButton("📢 Broadcast", callback_data="broadcast")],
-            [InlineKeyboardButton("➕ Aggiungi comando", callback_data="add_command")],
-            [InlineKeyboardButton("➖ Elimina comando", callback_data="remove_command")]
-        ]
-        await query.edit_message_text(
-            "🔧 PANNELLO ADMIN",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
 
-# ================= COMANDI ADMIN =================
+        cursor.execute("SELECT COUNT(*) FROM users")
+        total = cursor.fetchone()[0]
+
+        await query.edit_message_text(f"👥 Utenti: {total}")
+
+    elif query.data == "broadcast":
+        if update.effective_user.id != ADMIN_ID:
+            return
+
+        user_state[update.effective_user.id] = "broadcast"
+
+        await query.edit_message_text("📢 Invia il messaggio da mandare a tutti")
+
+# ================= ADMIN =================
 async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
-        await update.message.reply_text("❌ Non sei autorizzato!")
         return
 
     keyboard = [
         [InlineKeyboardButton("📊 Statistiche", callback_data="stats")],
-        [InlineKeyboardButton("📢 Broadcast", callback_data="broadcast")],
-        [InlineKeyboardButton("➕ Aggiungi comando", callback_data="add_command")],
-        [InlineKeyboardButton("➖ Elimina comando", callback_data="remove_command")]
+        [InlineKeyboardButton("📢 Broadcast", callback_data="broadcast")]
     ]
+
     await update.message.reply_text(
-        "🔧 PANNELLO ADMIN",
+        "🔧 ADMIN PANEL",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
-async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        return
-
-    cursor.execute("SELECT COUNT(*) FROM users")
-    total = cursor.fetchone()[0]
-
-    cursor.execute("""
-    SELECT COUNT(*) FROM users
-    WHERE last_active > NOW() - INTERVAL '1 day'
-    """)
-    today = cursor.fetchone()[0]
-
-    cursor.execute("""
-    SELECT COUNT(*) FROM users
-    WHERE last_active > NOW() - INTERVAL '30 days'
-    """)
-    month = cursor.fetchone()[0]
-
-    await update.message.reply_text(
-        f"📊 STATISTICHE\n\n"
-        f"👥 Totali: {total}\n"
-        f"🔥 Oggi: {today}\n"
-        f"📅 Mese: {month}"
-    )
-
-async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        await update.message.reply_text("❌ Non sei autorizzato!")
-        return
-
-    user_state[update.effective_user.id] = "broadcast"
-    await update.message.reply_text(
-        "📢 Invia il messaggio da inviare a tutti gli utenti (testo, foto o video)"
-    )
-
-async def add_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        return
-
-    await update.callback_query.edit_message_text(
-        "➕ AGGIUNGI COMANDO\n\n"
-        "Scrivi il comando che vuoi aggiungere nel formato:\n"
-        "/nuovo_comando [descrizione]\n\n"
-        "Esempio: /nuovo_comando Mostra informazioni aggiuntive"
-    )
-    user_state[update.effective_user.id] = "add_command"
-
-async def remove_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_ID:
-        return
-
-    await update.callback_query.edit_message_text(
-        "➖ ELIMINA COMANDO\n\n"
-        "Scrivi il comando che vuoi eliminare (senza /)\n\n"
-        "Esempio: nuovo_comando"
-    )
-    user_state[update.effective_user.id] = "remove_command"
-
-# ================= GESTIONE MESSAGGI =================
+# ================= BROADCAST =================
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     update_active(user_id)
 
-    # Gestione broadcast
     if user_state.get(user_id) == "broadcast":
         cursor.execute("SELECT user_id FROM users")
         users = cursor.fetchall()
 
         sent = 0
-        blocked = 0
+        removed = 0
 
         for (uid,) in users:
             try:
@@ -259,91 +160,42 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     from_chat_id=update.effective_chat.id,
                     message_id=update.message.message_id
                 )
+
                 sent += 1
-                await asyncio.sleep(0.05)
+                await asyncio.sleep(0.08)
+
+            except Forbidden:
+                cursor.execute("DELETE FROM users WHERE user_id = %s", (uid,))
+                conn.commit()
+                removed += 1
+
+            except BadRequest as e:
+                if "chat not found" in str(e):
+                    cursor.execute("DELETE FROM users WHERE user_id = %s", (uid,))
+                    conn.commit()
+                    removed += 1
+
             except Exception as e:
-                blocked += 1
-                print(f"⚠️ Utente {uid} ha bloccato il bot o c'è stato un errore: {e}")
+                print(f"Errore {uid}: {e}")
 
         user_state[user_id] = None
+
         await update.message.reply_text(
-            f"✅ Inviato con successo: {sent}\n"
-            f"❌ Bloccati/Errori: {blocked}\n"
-            f"📊 Totale utenti: {len(users)}"
+            f"✅ Inviati: {sent}\n🧹 Rimossi: {removed}"
         )
 
-    # Gestione aggiunta comando
-    elif user_state.get(user_id) == "add_command":
-        if context.args:
-            new_command = context.args[0].lower()
-            description = " ".join(context.args[1:]) if len(context.args) > 1 else "Nessuna descrizione"
-            await update.message.reply_text(f"✅ Comando /{new_command} aggiunto con descrizione: {description}")
-        else:
-            await update.message.reply_text("⚠️ Usa: /nuovo_comando [descrizione]")
-        user_state[user_id] = None
-
-    # Gestione rimozione comando
-    elif user_state.get(user_id) == "remove_command":
-        if context.args:
-            command_to_remove = context.args[0].lower()
-            await update.message.reply_text(f"✅ Comando /{command_to_remove} rimosso")
-        else:
-            await update.message.reply_text("⚠️ Usa: rimuovi_comando [nome_comando]")
-        user_state[user_id] = None
-
-# ================= MAIN CON GESTIONE SICURA =================
+# ================= MAIN =================
 def main():
-    import logging
-    logging.basicConfig(
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        level=logging.INFO
-    )
-    logger = logging.getLogger(__name__)
+    app = Application.builder().token(TOKEN).build()
 
-    setup_database()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("admin", admin))
 
-    try:
-        # Controlla se l'event loop è già in esecuzione
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            logger.warning("Event loop già in esecuzione - creazione nuova task")
-            asyncio.create_task(start_bot())
-        else:
-            logger.info("Avvio nuovo event loop")
-            loop.run_until_complete(start_bot())
-    except RuntimeError as e:
-        if "This event loop is already running" in str(e):
-            logger.warning("Event loop già in esecuzione - creazione nuova task")
-            asyncio.create_task(start_bot())
-        else:
-            raise
+    app.add_handler(CallbackQueryHandler(buttons))
+    app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle))
 
-async def start_bot():
-    """Funzione separata per l'avvio del bot"""
-    try:
-        app = Application.builder().token(TOKEN).build()
-
-        # Comandi principali
-        app.add_handler(CommandHandler("start", start))
-        app.add_handler(CommandHandler("info", info))
-        app.add_handler(CommandHandler("canali", canali))
-        app.add_handler(CommandHandler("contatti", contatti))
-        app.add_handler(CommandHandler("admin", admin))
-
-        # Comandi admin
-        app.add_handler(CommandHandler("stats", stats))
-        app.add_handler(CommandHandler("broadcast", broadcast))
-
-        # Pulsanti e messaggi
-        app.add_handler(CallbackQueryHandler(buttons))
-        app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, handle))
-
-        print("✅ BOT ONLINE PERFETTO")
-        await app.run_polling()
-
-    except Exception as e:
-        print(f"❌ ERRORE NEL BOT: {e}")
-        raise
+    print("✅ BOT ONLINE LIVELLO 100")
+    app.run_polling()
 
 if __name__ == "__main__":
     main()
