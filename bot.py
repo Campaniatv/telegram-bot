@@ -104,10 +104,17 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("📢 CANALI:", reply_markup=InlineKeyboardMarkup(keyboard))
 
     elif query.data == "contatti":
-        await query.edit_message_text(
-            "📞 Contatti:\nTelegram: @CAMPANIAVIP",
-            reply_markup=back()
-        )
+    keyboard = [
+        [InlineKeyboardButton("💬 Telegram", url="https://t.me/CAMPANIAVIP")],
+        [InlineKeyboardButton("📱 WhatsApp", url="https://wa.me/393509741712")],
+        [InlineKeyboardButton("🔙 Indietro", callback_data="home")]
+    ]
+
+    await query.edit_message_text(
+        "📞 CONTATTI\n\nScegli come contattarci:",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
 
     elif query.data == "stats":
         if update.effective_user.id != ADMIN_ID:
